@@ -1,0 +1,7 @@
+:root {
+  --color-background: #f6f7fb; --color-surface: #ffffff; --color-text: #172033; --color-text-muted: #536078;
+  --color-border: #dfe4ef; --color-border-strong: #b7c1d3; --color-accent: #304e9b; --color-accent-strong: #213a7a;
+  --color-accent-text: #ffffff; --color-focus: #7b9cff; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.5rem;
+  --space-6: 2rem; --space-7: 3rem; --page-gutter: clamp(1.25rem, 4vw, 3rem); --radius-small: 0.625rem;
+  --radius-large: 1.25rem; --shadow-panel: 0 1rem 3rem rgb(23 32 51 / 8%); --font-size-small: 0.875rem; --font-size-large: 1.5rem;
+}
