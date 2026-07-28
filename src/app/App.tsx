@@ -4,6 +4,7 @@ import type { AnalysisStageId, AnalysisStageStatus, ProjectAnalysis } from '../a
 import { AnalysisProgress } from './AnalysisProgress'
 import { AnalysisWorkspace } from './AnalysisWorkspace'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
+import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
 import './app.css'
 
@@ -68,7 +69,7 @@ export function App() {
       </section>
 
       {(isRunning || analysis || error) && <AnalysisProgress stages={stages} />}
-      {analysis && <AnalysisWorkspace analysis={analysis} />}
+      {analysis && <AnalysisWorkspace analysis={analysis} learningPacks={preparedSampleLearningPacks} />}
     </main>
   )
 }
