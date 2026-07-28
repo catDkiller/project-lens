@@ -1,3 +1,12 @@
 export { buildImportGraph, extractStaticImportSpecifiers } from './imports'
+export { detectFeatures } from './features'
 export { createProjectInventory } from './inventory'
-export type { ImportRelationship, InventoryFile, ProjectInventory } from './types'
+export type {
+  FeatureDetectionResult,
+  FeatureDefinition,
+  FeatureEvidence,
+  ImportRelationship,
+  InventoryFile,
+  ProjectInventory,
+  RelevantFeatureFile,
+} from './types'

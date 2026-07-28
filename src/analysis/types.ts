@@ -17,3 +17,38 @@ export interface ImportRelationship {
   resolution: 'resolved' | 'unresolved' | 'external'
   resolvedPath?: string
 }
+
+export interface FeatureEvidence {
+  path: string
+  fact: string
+  weight: number
+}
+
+export interface RelevantFeatureFile {
+  path: string
+  score: number
+  reasons: string[]
+}
+
+export interface FeatureDetectionResult {
+  featureId: string
+  label: string
+  confidence: 'low' | 'medium' | 'high'
+  relevantFiles: RelevantFeatureFile[]
+  evidence: FeatureEvidence[]
+}
+
+export interface FeatureEvidenceRule {
+  pattern: RegExp
+  fact: string
+  weight: number
+}
+
+export interface FeatureDefinition {
+  id: string
+  label: string
+  filenameTokens: string[]
+  routeRules?: FeatureEvidenceRule[]
+  contentRules?: FeatureEvidenceRule[]
+  importRules?: FeatureEvidenceRule[]
+}

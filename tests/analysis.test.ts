@@ -10,7 +10,15 @@ function project(files: NormalizedProject['files']): NormalizedProject {
 describe('createProjectInventory', () => {
   it('inventories the prepared sample project', () => {
     expect(createProjectInventory(preparedViteSample).files.map((file) => file.path)).toEqual([
-      'src/App.tsx', 'src/main.tsx',
+      'src/App.tsx',
+      'src/components/AppHeader.tsx',
+      'src/components/LoginForm.tsx',
+      'src/components/MetricCard.tsx',
+      'src/main.tsx',
+      'src/pages/DashboardPage.tsx',
+      'src/pages/LoginPage.tsx',
+      'src/services/authService.ts',
+      'src/utils/formatDate.ts',
     ])
   })
 
