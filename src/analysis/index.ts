@@ -1,2 +1,3 @@
-// Deterministic analysis modules are added in the next implementation task.
-export {}
+export { buildImportGraph, extractStaticImportSpecifiers } from './imports'
+export { createProjectInventory } from './inventory'
+export type { ImportRelationship, InventoryFile, ProjectInventory } from './types'
