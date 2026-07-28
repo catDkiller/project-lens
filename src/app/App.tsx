@@ -1,13 +1,37 @@
 import { useState } from 'react'
+import { analysisStages, runProjectAnalysis } from '../analysis'
+import type { AnalysisStageId, AnalysisStageStatus, ProjectAnalysis } from '../analysis'
+import { AnalysisProgress } from './AnalysisProgress'
+import { AnalysisWorkspace } from './AnalysisWorkspace'
+import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
-import type { NormalizedProject } from '../project-sources/types'
 import './app.css'
 
+const initialStages = Object.fromEntries(analysisStages.map((stage) => [stage.id, 'pending'])) as Record<AnalysisStageId, AnalysisStageStatus>
+
 export function App() {
-  const [openedProject, setOpenedProject] = useState<NormalizedProject | null>(null)
+  const [stages, setStages] = useState(initialStages)
+  const [analysis, setAnalysis] = useState<ProjectAnalysis | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isRunning, setIsRunning] = useState(false)
 
   async function openPreparedSample() {
-    setOpenedProject(await bundledSampleProjectSource.load())
+    setAnalysis(null)
+    setError(null)
+    setStages(initialStages)
+    setIsRunning(true)
+
+    try {
+      const project = await bundledSampleProjectSource.load()
+      const result = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (id, status) => {
+        setStages((current) => ({ ...current, [id]: status }))
+      }, 120)
+      setAnalysis(result)
+    } catch {
+      setError('Project analysis could not finish. Please try the prepared sample again.')
+    } finally {
+      setIsRunning(false)
+    }
   }
 
   return (
@@ -27,8 +51,8 @@ export function App() {
         </div>
 
         <div className="source-actions">
-          <button className="primary-action" type="button" onClick={openPreparedSample}>
-            Open prepared sample
+          <button className="primary-action" type="button" onClick={openPreparedSample} disabled={isRunning}>
+            {isRunning ? 'Analysing prepared sample…' : analysis ? 'Analyse prepared sample again' : 'Open prepared sample'}
           </button>
           <button className="secondary-action" type="button" disabled>
             Local folder — coming later
@@ -40,12 +64,11 @@ export function App() {
           sources, not part of this foundation.
         </p>
 
-        {openedProject && (
-          <p className="ready-state" role="status">
-            {openedProject.name} is loaded and ready for analysis.
-          </p>
-        )}
+        {error && <p className="error-state" role="alert">{error}</p>}
       </section>
+
+      {(isRunning || analysis || error) && <AnalysisProgress stages={stages} />}
+      {analysis && <AnalysisWorkspace analysis={analysis} />}
     </main>
   )
 }
