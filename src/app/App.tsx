@@ -1,42 +1,50 @@
-import { useState } from 'react'
-import { analysisStages, runProjectAnalysis } from '../analysis'
-import type { AnalysisStageId, AnalysisStageStatus, ProjectAnalysis } from '../analysis'
+import { useEffect, useState } from 'react'
+import { runProjectAnalysis } from '../analysis'
+import type { ProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
+import { preparedSampleAgents } from '../fixtures/launcherDemo'
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
+import { createProjectKnowledgeBase } from '../knowledge'
+import type { ProjectKnowledgeBase } from '../knowledge'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
-import { AnalysisProgress } from './AnalysisProgress'
-import { AnalysisWorkspace } from './AnalysisWorkspace'
+import { Launcher } from './Launcher'
+import { KnowledgeWorkspace } from './KnowledgeWorkspace'
+import type { Accent, Appearance } from './ThemeMenu'
 import './app.css'
 
-const initialStages = Object.fromEntries(analysisStages.map((stage) => [stage.id, 'pending'])) as Record<AnalysisStageId, AnalysisStageStatus>
+type AppMode = 'launcher' | 'analysing' | 'workspace'
 
 export function App() {
-  const [stages, setStages] = useState(initialStages)
-  const [analysis, setAnalysis] = useState<ProjectAnalysis | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isRunning, setIsRunning] = useState(false)
+  const [mode, setMode] = useState<AppMode>('launcher')
+  const [knowledge, setKnowledge] = useState<ProjectKnowledgeBase | null>(null)
+  const [error, setError] = useState<string>()
+  const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'light' : localStorage.getItem('project-lens-appearance') as Appearance || 'light')
+  const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
 
-  async function openPreparedSample() {
-    setError(null)
-    setStages(initialStages)
-    setIsRunning(true)
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', appearance === 'dark')
+    document.documentElement.dataset.accent = accent
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('project-lens-appearance', appearance)
+      localStorage.setItem('project-lens-accent', accent)
+    }
+  }, [appearance, accent])
+
+  async function analyseSample() {
+    setMode('analysing')
+    setError(undefined)
     try {
       const project = await bundledSampleProjectSource.load()
-      setAnalysis(await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (id, status) => setStages((current) => ({ ...current, [id]: status })), 120))
+      const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, () => {}, 120)
+      setKnowledge(createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample'))
+      setMode('workspace')
     } catch {
-      setError('Project analysis could not finish. Please try the prepared sample again.')
-    } finally {
-      setIsRunning(false)
+      setError('The prepared sample could not be analysed. Try again.')
+      setMode('launcher')
     }
   }
 
-  function restart() {
-    setAnalysis(null)
-    setError(null)
-    setStages(initialStages)
-  }
-
-  if (analysis) return <AnalysisWorkspace analysis={analysis} learningPacks={preparedSampleLearningPacks} onRestart={restart} />
-
-  return <main className="start-screen"><section aria-labelledby="product-name"><h1 id="product-name">Project Lens</h1><p>Browse a software project’s structure, implementation choices, and learning priorities.</p><div className="start-actions"><button className="primary-action" type="button" onClick={openPreparedSample} disabled={isRunning}>Try prepared sample</button><button className="secondary-action" type="button" disabled>Open local project — coming soon</button></div>{isRunning && <AnalysisProgress stages={stages} />}{error && <p className="error-state" role="alert">{error}</p>}</section></main>
+  function returnToLauncher() { setKnowledge(null); setMode('launcher') }
+  if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={analyseSample} />
+  return <Launcher agents={preparedSampleAgents} isAnalysing={mode === 'analysing'} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseSample} />
 }

@@ -1,0 +1,11 @@
+import { useState } from 'react'
+import type { LauncherAgentOption } from '../fixtures/launcherDemo'
+import type { Accent, Appearance } from './ThemeMenu'
+import { ThemeMenu } from './ThemeMenu'
+
+interface LauncherProps { agents: LauncherAgentOption[]; isAnalysing: boolean; error?: string; appearance: Appearance; accent: Accent; onAppearance: (value: Appearance) => void; onAccent: (value: Accent) => void; onTrySample: () => void }
+
+export function Launcher({ agents, isAnalysing, error, appearance, accent, onAppearance, onAccent, onTrySample }: LauncherProps) {
+  const [agentId, setAgentId] = useState(agents[0]?.id ?? '')
+  return <main className="launcher-screen"><header className="launcher-header"><strong className="brand">Project Lens</strong><ThemeMenu appearance={appearance} accent={accent} onAppearance={onAppearance} onAccent={onAccent} /></header><section className="launcher"><p className="eyebrow">Project knowledge workspace</p><h1>Understand what was built.</h1><p className="launcher-copy">Inspect a project’s structure, implementation choices, and learning priorities from one stable analysis.</p><div className="launcher-box"><button className="folder-choice" disabled type="button">Choose a project folder <span>Local access coming soon</span></button><div className="launcher-divider" /><label className="field-label">Analysis configuration<select aria-label="Sample analysis configuration" value={agentId} onChange={(event) => setAgentId(event.target.value)}>{agents.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.models[0]}</option>)}</select></label><button className="analyse-button" disabled type="button">Analyse local project</button></div><p className="launcher-note">Local folder and agent detection are not available in this prototype. The configuration above applies only to the prepared sample.</p><button className="sample-link" disabled={isAnalysing} type="button" onClick={onTrySample}>{isAnalysing ? 'Analysing project…' : 'Try sample project →'}</button>{isAnalysing && <details className="analysis-details"><summary>Analysis details</summary><p>Inventory, import extraction, relationship building, and project-part detection are running.</p></details>}{error && <p className="error-state" role="alert">{error}</p>}</section></main>
+}
