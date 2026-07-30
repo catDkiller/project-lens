@@ -18,7 +18,7 @@ async function sampleKnowledge() {
 describe('open-design knowledge workspace', () => {
   it('keeps the launcher and workspace mutually exclusive', () => {
     const markup = renderToStaticMarkup(<App />)
-    expect(markup).toContain('Try sample project')
+    expect(markup).toContain('Try a sample project')
     expect(markup).not.toContain('Open another project')
   })
 
@@ -41,7 +41,7 @@ describe('open-design knowledge workspace', () => {
   it('keeps sample-only agent data outside reusable components', async () => {
     const knowledge = await sampleKnowledge()
     expect(knowledge.name).toBe(preparedViteSample.name)
-    expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={knowledge} appearance="light" accent="emerald" onAppearance={vi.fn()} onAccent={vi.fn()} onReturn={vi.fn()} onReanalyse={vi.fn()} />)).not.toContain('Codex (sample configuration)')
+    expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={knowledge} appearance="light" accent="emerald" onAppearance={vi.fn()} onAccent={vi.fn()} onReturn={vi.fn()} onReanalyse={vi.fn()} />)).not.toContain('Built-in sample analysis')
   })
 
   it('renders long project names and paths without changing the knowledge contract', () => {
