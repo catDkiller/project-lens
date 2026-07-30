@@ -54,7 +54,7 @@ describe('open-design knowledge workspace', () => {
 
   it('marks the selected appearance and accent in the theme control', () => {
     const markup = renderToStaticMarkup(<ThemeMenu appearance="dark" accent="rose" onAppearance={vi.fn()} onAccent={vi.fn()} />)
-    expect(markup).toContain('aria-pressed="true">dark')
-    expect(markup).toContain('aria-pressed="true"><span class="swatch rose"')
+    expect(markup).toContain('aria-pressed="true" type="button">dark')
+    expect(markup).toContain('aria-pressed="true" type="button"><span class="swatch rose"')
   })
 })
