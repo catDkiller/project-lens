@@ -4,8 +4,10 @@ export type Accent = 'blue' | 'violet' | 'emerald' | 'amber' | 'rose'
 interface ThemeMenuProps { appearance: Appearance; accent: Accent; onAppearance: (value: Appearance) => void; onAccent: (value: Accent) => void }
 
 export function ThemeMenu({ appearance, accent, onAppearance, onAccent }: ThemeMenuProps) {
+  const scope = useRef<HTMLDetailsElement>(null)
+  useDisclosureMotion(scope)
   return (
-    <details className="theme-menu">
+    <details className="theme-menu" ref={scope}>
       <summary aria-label="Appearance and accent settings" className="theme-toggle">
         <span className="theme-toggle-icon" aria-hidden="true">
           <svg viewBox="0 0 16 16" fill="none">
@@ -23,3 +25,5 @@ export function ThemeMenu({ appearance, accent, onAppearance, onAccent }: ThemeM
     </details>
   )
 }
+import { useRef } from 'react'
+import { useDisclosureMotion } from '../motion/useDisclosureMotion'

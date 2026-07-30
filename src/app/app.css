@@ -25,6 +25,7 @@
   justify-content: space-between;
   min-height: 3.25rem;
   padding: 1rem 1.5rem;
+  width: 100%;
 }
 
 .brand-group,
@@ -66,7 +67,7 @@
 .theme-toggle {
   align-items: center;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   color: var(--fg-secondary);
   cursor: pointer;
@@ -141,24 +142,27 @@
   width: 0.55rem;
 }
 
-.swatch.blue { background: #2563eb; }
-.swatch.violet { background: #6b5cc7; }
-.swatch.emerald { background: #0d8a6b; }
-.swatch.amber { background: #b8862a; }
-.swatch.rose { background: #c84b6e; }
+.swatch.blue { background: var(--accent-blue); }
+.swatch.violet { background: var(--accent-violet); }
+.swatch.emerald { background: var(--accent-emerald); }
+.swatch.amber { background: var(--accent-amber); }
+.swatch.rose { background: var(--accent-rose); }
 
 .launcher-stage {
   align-items: center;
   display: grid;
   gap: 1.25rem;
   justify-items: center;
+  min-width: 0;
   padding: 4.5rem 1.5rem 2rem;
+  width: 100%;
 }
 
 .launcher-copy-block {
   display: grid;
   gap: 0.6rem;
   max-width: 40rem;
+  min-width: 0;
   text-align: center;
 }
 
@@ -191,7 +195,7 @@ h1 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 3%);
+  box-shadow: 0 0.75rem 2.5rem rgb(10 20 30 / 6%), 0 1px 2px rgb(10 20 30 / 5%);
   display: flex;
   max-width: 40rem;
   min-height: 3rem;
@@ -347,6 +351,11 @@ h1 {
   padding: 0 0.8rem;
 }
 
+.launcher-analyse:not(:disabled):hover,
+.reanalyse-button:hover {
+  box-shadow: 0 0.4rem 1rem color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .launcher-analyse:disabled {
   opacity: 0.45;
 }
@@ -384,6 +393,22 @@ h1 {
   color: var(--danger);
   font-size: 0.875rem;
   margin: 0;
+}
+
+.analysis-activity {
+  align-items: center;
+  color: var(--fg-secondary);
+  display: inline-flex;
+  font-size: 0.8125rem;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.analysis-activity span {
+  background: var(--accent);
+  border-radius: 50%;
+  height: 0.45rem;
+  width: 0.45rem;
 }
 
 .workspace {
@@ -469,6 +494,15 @@ h1 {
   font-weight: 700;
 }
 
+.sidebar button:focus-visible,
+.theme-toggle:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .content {
   background: var(--surface-soft);
   min-width: 0;
@@ -531,6 +565,14 @@ dd {
   gap: 0.3rem;
   padding: 0.9rem;
   text-align: left;
+}
+
+.project-part-list button:hover,
+.part-tabs button:hover,
+.sidebar button:hover,
+.theme-popover button:hover {
+  background: var(--accent-light);
+  color: var(--heading-secondary);
 }
 
 .project-part-list span,
@@ -599,7 +641,7 @@ dd {
 
 .topic-list > div {
   background: var(--surface);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--secondary-accent);
   border-radius: var(--radius-sm);
   padding: 0.9rem;
 }
@@ -667,6 +709,28 @@ pre {
   padding-top: 0.85rem;
 }
 
+[data-motion-enter],
+.sidebar button.active,
+.content > article,
+.launcher-screen button:not(:disabled),
+.workspace button:not(:disabled),
+.workspace summary,
+.launcher-screen summary {
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-motion-enter],
+  .sidebar button.active,
+  .content > article,
+  .launcher-screen button:not(:disabled),
+  .workspace button:not(:disabled),
+  .workspace summary,
+  .launcher-screen summary {
+    will-change: auto;
+  }
+}
+
 summary {
   color: var(--fg-secondary);
   cursor: pointer;
@@ -693,7 +757,8 @@ summary {
   .launcher-copy-block {
     max-width: 100%;
     text-align: left;
-    width: 100%;
+    width: auto;
+    justify-self: stretch;
   }
 
   h1 {
@@ -709,6 +774,8 @@ summary {
     align-items: stretch;
     flex-direction: column;
     max-width: 100%;
+    width: auto;
+    justify-self: stretch;
   }
 
   .launcher-folder {
@@ -723,7 +790,22 @@ summary {
 
   .launcher-controls {
     justify-content: space-between;
+    min-width: 0;
     padding: 0.45rem;
+  }
+
+  .launcher-picker,
+  .launcher-picker summary {
+    min-width: 0;
+  }
+
+  .launcher-picker summary {
+    max-width: calc(100vw - 9rem);
+  }
+
+  #launcherPickerValue {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .launcher-picker-menu {
@@ -735,7 +817,8 @@ summary {
   .launcher-footer {
     align-items: flex-start;
     flex-direction: column;
-    width: 100%;
+    width: auto;
+    justify-self: stretch;
   }
 
   .topbar {

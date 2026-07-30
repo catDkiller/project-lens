@@ -1,11 +1,15 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { AnalysisStageId } from '../analysis'
 import type { LauncherAgentOption } from '../fixtures/launcherDemo'
 import type { Accent, Appearance } from './ThemeMenu'
 import { ThemeMenu } from './ThemeMenu'
+import { useControlMotion } from '../motion/useControlMotion'
+import { useEntranceMotion } from '../motion/useEntranceMotion'
 
 interface LauncherProps {
   agents: LauncherAgentOption[]
   isAnalysing: boolean
+  analysisStage?: AnalysisStageId
   error?: string
   appearance: Appearance
   accent: Accent
@@ -17,6 +21,7 @@ interface LauncherProps {
 export function Launcher({
   agents,
   isAnalysing,
+  analysisStage,
   error,
   appearance,
   accent,
@@ -24,14 +29,17 @@ export function Launcher({
   onAccent,
   onTrySample,
 }: LauncherProps) {
+  const motionScope = useRef<HTMLElement>(null)
   const [agentId, setAgentId] = useState(agents[0]?.id ?? '')
   const [model, setModel] = useState(agents[0]?.models[0] ?? '')
   const selectedAgent = agents.find((item) => item.id === agentId) ?? agents[0]
   const selectedModels = selectedAgent?.models ?? []
   const selectedModel = selectedModels.includes(model) ? model : selectedModels[0] ?? ''
+  useEntranceMotion(motionScope, isAnalysing ? 'analysing' : 'launcher')
+  useControlMotion(motionScope)
 
   return (
-    <main className="launcher-screen">
+    <main className="launcher-screen" ref={motionScope}>
       <header className="launcher-header">
         <div className="brand-group">
           <span className="brand-mark" aria-hidden="true">
@@ -46,12 +54,12 @@ export function Launcher({
       </header>
 
       <section className="launcher-stage">
-        <div className="launcher-copy-block">
+        <div className="launcher-copy-block" data-motion-enter>
           <h1>Understand what was built.</h1>
           <p className="launcher-copy">A calm workspace for opening a project, inspecting what matters, and learning from the implementation.</p>
         </div>
 
-        <div className="lens-launcher" aria-label="Prepared sample launcher">
+        <div className="lens-launcher" aria-label="Prepared sample launcher" data-motion-enter>
           <button className="launcher-folder" disabled type="button">
             <span className="launcher-folder-icon" aria-hidden="true">
               <svg viewBox="0 0 16 16" fill="none">
@@ -92,7 +100,7 @@ export function Launcher({
           </div>
         </div>
 
-        <div className="launcher-footer">
+        <div className="launcher-footer" data-motion-enter>
           <button className="link-sample" disabled={isAnalysing} type="button" onClick={onTrySample}>
             Try a sample project <span aria-hidden="true">→</span>
           </button>
@@ -100,6 +108,7 @@ export function Launcher({
         </div>
 
         {error && <p className="error-state" role="alert">{error}</p>}
+        {isAnalysing && <p className="analysis-activity" data-motion-enter role="status"><span aria-hidden="true" />{analysisStage ? `Checking ${analysisStage}…` : 'Preparing analysis…'}</p>}
       </section>
     </main>
   )

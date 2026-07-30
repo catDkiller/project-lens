@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { runProjectAnalysis } from '../analysis'
-import type { ProjectAnalysis } from '../analysis'
+import type { AnalysisStageId, ProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleAgents } from '../fixtures/launcherDemo'
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
@@ -19,7 +19,8 @@ export function App() {
   const [mode, setMode] = useState<AppMode>('launcher')
   const [knowledge, setKnowledge] = useState<PresentationKnowledgeBase | null>(null)
   const [error, setError] = useState<string>()
-  const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'light' : localStorage.getItem('project-lens-appearance') as Appearance || 'light')
+  const [analysisStage, setAnalysisStage] = useState<AnalysisStageId>()
+  const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
 
   useEffect(() => {
@@ -34,9 +35,12 @@ export function App() {
   async function analyseSample() {
     setMode('analysing')
     setError(undefined)
+    setAnalysisStage(undefined)
     try {
       const project = await bundledSampleProjectSource.load()
-      const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, () => {}, 120)
+      const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, status) => {
+        if (status === 'running') setAnalysisStage(stage)
+      }, 120)
       const rawKnowledge = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample')
       setKnowledge(validatePresentationKnowledgeBase(preparedSamplePresentationKnowledge, rawKnowledge).length ? createPresentationFallback(rawKnowledge) : preparedSamplePresentationKnowledge)
       setMode('workspace')
@@ -48,5 +52,5 @@ export function App() {
 
   function returnToLauncher() { setKnowledge(null); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={analyseSample} />
-  return <Launcher agents={preparedSampleAgents} isAnalysing={mode === 'analysing'} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseSample} />
+  return <Launcher agents={preparedSampleAgents} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseSample} />
 }
