@@ -6,55 +6,73 @@ import { KnowledgeWorkspace } from '../src/app/KnowledgeWorkspace'
 import { ThemeMenu } from '../src/app/ThemeMenu'
 import { preparedSampleFeatureDefinitions } from '../src/fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleLearningPacks } from '../src/fixtures/preparedSampleLearningPacks'
+import { preparedSamplePresentationKnowledge } from '../src/fixtures/preparedSamplePresentationKnowledge'
 import { preparedViteSample } from '../src/fixtures/preparedViteSample'
-import { createProjectKnowledgeBase } from '../src/knowledge'
-import type { ProjectKnowledgeBase } from '../src/knowledge'
+import { createPresentationFallback, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../src/knowledge'
+import type { PresentationKnowledgeBase } from '../src/knowledge'
 
-async function sampleKnowledge() {
+const workspaceProps = { appearance: 'light' as const, accent: 'blue' as const, onAppearance: vi.fn(), onAccent: vi.fn(), onReturn: vi.fn(), onReanalyse: vi.fn() }
+
+async function rawKnowledge() {
   const analysis = await runProjectAnalysis(preparedViteSample, preparedSampleFeatureDefinitions, () => {})
   return createProjectKnowledgeBase(analysis, preparedSampleLearningPacks)
 }
 
-describe('open-design knowledge workspace', () => {
+describe('presentation knowledge workspace', () => {
   it('keeps the launcher and workspace mutually exclusive', () => {
     const markup = renderToStaticMarkup(<App />)
     expect(markup).toContain('Try a sample project')
     expect(markup).not.toContain('Open another project')
   })
 
-  it('adapts deterministic analysis into the overview data', async () => {
-    const knowledge = await sampleKnowledge()
-    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={knowledge} appearance="light" accent="blue" onAppearance={vi.fn()} onAccent={vi.fn()} onReturn={vi.fn()} onReanalyse={vi.fn()} />)
-    expect(knowledge.projectParts?.map((part) => part.name)).toEqual(['Navigation', 'Login', 'Dashboard'])
-    expect(markup).toContain('9 analysed files')
-    expect(markup).toContain('Complete Guide')
+  it('uses presentation language instead of raw analyser descriptions', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
+    expect(markup).toContain('A small web application with a sign-in screen')
+    expect(markup).not.toContain('Analysed project file.')
+    expect(markup).not.toContain('Static imports')
   })
 
-  it('renders a non-web knowledge base without empty optional navigation', () => {
-    const knowledge: ProjectKnowledgeBase = { id: 'research', name: 'Climate notes', sourceType: 'Local', category: 'research project', summary: 'A partially inspected research repository.', importantFiles: [{ id: 'notes.ipynb', path: 'notes.ipynb', itemType: 'notebook', analysisStatus: 'partial', limitations: ['Notebook cells were not inspected.'] }], limitations: ['Notebook content is partially supported.'] }
+  it('keeps technical evidence available in disclosures', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
+    expect(markup).toContain('View technical evidence')
+    expect(markup).toContain('View analysis notes')
+    expect(markup).toContain('Dynamic imports, aliases, and package internals are not inspected.')
+  })
+
+  it('keeps plain titles and technical names separate', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
+    expect(markup).toContain('Moving between screens')
+    expect(markup).toContain('Technical name: react-router-dom')
+  })
+
+  it('renders a non-web presentation without web assumptions', () => {
+    const knowledge: PresentationKnowledgeBase = { version: '1.0', projectName: 'Climate notes', projectTypeLabel: 'Research project', shortSummary: 'A partially inspected research repository.', overview: { whatItIs: 'A collection of climate research notes.' }, files: [{ path: 'notes.ipynb', explanation: 'The file was found, but its exact role could not be confirmed.', itemType: 'notebook', analysisStatus: 'partial' }], limitations: { id: 'notes', title: 'Analysis notes', items: [{ id: 'cells', title: 'Notebook cells', explanation: 'Notebook cells were not inspected.' }] } }
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={knowledge} appearance="dark" accent="violet" onAppearance={vi.fn()} onAccent={vi.fn()} onReturn={vi.fn()} onReanalyse={vi.fn()} />)
     expect(markup).toContain('Climate notes')
-    expect(markup).toContain('Analysis limitations')
-    expect(markup).not.toContain('Commands</button>')
+    expect(markup).toContain('Research project')
+    expect(markup).not.toContain('React Router')
   })
 
-  it('keeps sample-only agent data outside reusable components', async () => {
-    const knowledge = await sampleKnowledge()
-    expect(knowledge.name).toBe(preparedViteSample.name)
-    expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={knowledge} appearance="light" accent="emerald" onAppearance={vi.fn()} onAccent={vi.fn()} onReturn={vi.fn()} onReanalyse={vi.fn()} />)).not.toContain('Built-in sample analysis')
-  })
-
-  it('renders long project names and paths without changing the knowledge contract', () => {
-    const longPath = 'packages/very-long-feature-name/src/components/VeryLongProjectComponent.tsx'
-    const knowledge: ProjectKnowledgeBase = { id: 'long', name: 'A very long project name that should remain readable in the workspace header', sourceType: 'GitHub', importantFiles: [{ id: longPath, path: longPath, itemType: 'source', analysisStatus: 'analysed' }] }
-    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={knowledge} appearance="light" accent="blue" onAppearance={vi.fn()} onAccent={vi.fn()} onReturn={vi.fn()} onReanalyse={vi.fn()} />)
-    expect(markup).toContain(knowledge.name)
-    expect(markup).toContain(longPath)
+  it('keeps sample-only language out of reusable components', async () => {
+    const workspaceSource = await import('../src/app/KnowledgeWorkspace?raw')
+    expect(workspaceSource.default).not.toContain('Prepared Vite sample')
+    expect(workspaceSource.default).not.toContain('sign-in screen')
+    expect(workspaceSource.default).toContain('View import relationships')
+    expect(workspaceSource.default).toContain('View code excerpt')
   })
 
   it('marks the selected appearance and accent in the theme control', () => {
     const markup = renderToStaticMarkup(<ThemeMenu appearance="dark" accent="rose" onAppearance={vi.fn()} onAccent={vi.fn()} />)
     expect(markup).toContain('aria-pressed="true" type="button">dark')
     expect(markup).toContain('aria-pressed="true" type="button"><span class="swatch rose"')
+  })
+
+  it('validates the prepared presentation against real analysis evidence', async () => {
+    expect(validatePresentationKnowledgeBase(preparedSamplePresentationKnowledge, await rawKnowledge())).toEqual([])
+  })
+
+  it('uses an honest deterministic fallback when presentation data is unavailable', async () => {
+    const fallback = createPresentationFallback(await rawKnowledge())
+    expect(fallback.files?.find((file) => file.path === 'src/utils/formatDate.ts')?.explanation).toBe('The file was found, but its exact role could not be confirmed.')
   })
 })

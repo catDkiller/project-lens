@@ -1,2 +1,8 @@
 export { createProjectKnowledgeBase } from './adapter'
+export { createPresentationFallback } from './presentationFallback'
+export { validatePresentationKnowledgeBase } from './presentationValidation'
+export { PROJECT_EXPLANATION_PROMPT_VERSION, PROJECT_EXPLANATION_SYSTEM_PROMPT } from './prompts/projectExplanationPrompt'
+export { createProjectExplanationRequest } from './projectExplanation'
 export type { AnalysisStatus, ProjectItem, ProjectItemType, ProjectKnowledgeBase, ProjectPart } from './types'
+export type { EvidenceReference, PresentationFile, PresentationItem, PresentationKnowledgeBase, PresentationOverview, PresentationProjectPart, PresentationSection, PresentationTechnology } from './presentationTypes'
+export type { ProjectExplanationRequest } from './projectExplanation'

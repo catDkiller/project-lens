@@ -4,8 +4,9 @@ import type { ProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleAgents } from '../fixtures/launcherDemo'
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
-import { createProjectKnowledgeBase } from '../knowledge'
-import type { ProjectKnowledgeBase } from '../knowledge'
+import { createProjectKnowledgeBase, createPresentationFallback, validatePresentationKnowledgeBase } from '../knowledge'
+import type { PresentationKnowledgeBase } from '../knowledge'
+import { preparedSamplePresentationKnowledge } from '../fixtures/preparedSamplePresentationKnowledge'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
 import { Launcher } from './Launcher'
 import { KnowledgeWorkspace } from './KnowledgeWorkspace'
@@ -16,7 +17,7 @@ type AppMode = 'launcher' | 'analysing' | 'workspace'
 
 export function App() {
   const [mode, setMode] = useState<AppMode>('launcher')
-  const [knowledge, setKnowledge] = useState<ProjectKnowledgeBase | null>(null)
+  const [knowledge, setKnowledge] = useState<PresentationKnowledgeBase | null>(null)
   const [error, setError] = useState<string>()
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'light' : localStorage.getItem('project-lens-appearance') as Appearance || 'light')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
@@ -36,7 +37,8 @@ export function App() {
     try {
       const project = await bundledSampleProjectSource.load()
       const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, () => {}, 120)
-      setKnowledge(createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample'))
+      const rawKnowledge = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample')
+      setKnowledge(validatePresentationKnowledgeBase(preparedSamplePresentationKnowledge, rawKnowledge).length ? createPresentationFallback(rawKnowledge) : preparedSamplePresentationKnowledge)
       setMode('workspace')
     } catch {
       setError('The prepared sample could not be analysed. Try again.')
