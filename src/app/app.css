@@ -483,6 +483,7 @@ h1 {
 .workspace-body {
   display: grid;
   grid-template-columns: 12.5rem minmax(0, 1fr);
+  min-width: 0;
 }
 
 .sidebar {
@@ -525,12 +526,18 @@ select:focus-visible {
   background: var(--surface-soft);
   min-width: 0;
   padding: 2rem clamp(1.25rem, 5vw, 4rem) 4rem;
+  min-width: 0;
 }
 
 .content > article {
   margin: 0 auto;
   max-width: 52rem;
+  min-width: 0;
 }
+
+.guide-contents { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); display: flex; flex-wrap: wrap; gap: .35rem; margin: 1.25rem 0; padding: .45rem; }
+.guide-contents a { border-radius: var(--radius-sm); color: var(--fg-secondary); min-height: 2.35rem; padding: .55rem .7rem; text-decoration: none; }
+.guide-contents a:hover, .guide-contents a:focus-visible { background: var(--accent-light); color: var(--heading-secondary); }
 
 .content-section {
   border-top: 1px solid var(--border);
@@ -681,7 +688,10 @@ dd {
   display: grid;
   gap: 0.35rem;
   padding: 0.75rem;
+  min-width: 0;
 }
+
+.file-row code { overflow-wrap: anywhere; }
 
 code {
   font-family: var(--font-mono);
@@ -863,19 +873,24 @@ summary {
   }
 
   .workspace-body {
-    grid-template-columns: 3.2rem minmax(0, 1fr);
+    display: block;
   }
 
   .sidebar {
-    padding: 0.75rem 0.35rem;
+    display: flex;
+    gap: .25rem;
+    min-height: 0;
+    overflow-x: auto;
+    padding: .5rem;
+    position: sticky;
+    top: 0;
+    z-index: 2;
   }
 
   .sidebar button {
-    font-size: 0;
-    text-align: center;
-  }
-
-  .sidebar button::first-letter {
-    font-size: 0.78rem;
+    flex: 0 0 auto;
+    font-size: .75rem;
+    min-height: 2.5rem;
+    white-space: nowrap;
   }
 }

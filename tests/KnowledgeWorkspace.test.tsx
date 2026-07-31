@@ -45,6 +45,13 @@ describe('presentation knowledge workspace', () => {
     expect(markup).toContain('Dynamic imports, aliases, and package internals are not inspected.')
   })
 
+  it('keeps the guide navigable and marks the current section', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
+    expect(markup).toContain('aria-current="page"')
+    expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={{ ...preparedSamplePresentationKnowledge, projectParts: undefined, files: undefined, technicalReference: undefined } } {...workspaceProps} />)).not.toContain('guide-parts')
+  })
+
+
   it('keeps plain titles and technical names separate', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
     expect(markup).toContain('Moving between screens')
