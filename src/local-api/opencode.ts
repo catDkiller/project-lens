@@ -19,6 +19,11 @@ export class OpenCodeFailureError extends Error {
   readonly code: AnalysisFailureCode
   constructor(code: AnalysisFailureCode, message: string) { super(message); this.code = code; this.name = 'OpenCodeFailureError' }
 }
+export function stripTerminalControl(value: string) {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g, '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+}
+export class OpenCodeDatabaseBusyError extends OpenCodeFailureError { constructor(message: string) { super('opencode-database-busy', message); this.name = 'OpenCodeDatabaseBusyError' } }
 
 const openCodeCapabilities = {
   projectRead: true,
@@ -112,7 +117,7 @@ export function resolveOpenCodeExecutable(env: NodeJS.ProcessEnv = process.env):
   return null
 }
 
-export function runOpenCode(executable: string, args: string[], input = '', options: OpenCodeRunOptions = {}): Promise<OpenCodeRunResult> {
+function runOpenCodeUncoordinated(executable: string, args: string[], input = '', options: OpenCodeRunOptions = {}): Promise<OpenCodeRunResult> {
   return new Promise((resolve, reject) => {
     const { cwd = process.cwd(), env = process.env, signal } = options
     const child = spawn(executable, args, { cwd, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -124,18 +129,22 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
     const failAfter = (milliseconds: number | undefined, type: OpenCodeTimeoutType) => { if (milliseconds) timers.push(setTimeout(() => { timeout = type; terminate() }, milliseconds)) }
     const restartInactivity = () => { const index = timers.findIndex((timer) => timer === inactivityTimer); if (index >= 0) { clearTimeout(timers[index]); timers.splice(index, 1) }; inactivityTimer = setTimeout(() => { timeout = 'inactivity'; terminate() }, options.inactivityTimeoutMs ?? OPEN_CODE_TIMEOUTS.inactivityMs); timers.push(inactivityTimer) }
     let inactivityTimer: NodeJS.Timeout
-    const processEventLine = (line: string) => { if (!line.trim()) return; try { const parsed = JSON.parse(line) as Record<string, unknown>; if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') }; restartInactivity(); options.onStdoutEvent?.(parsed) } catch { /* Ignore non-JSON stdout; stderr is the diagnostic channel. */ } }
+    const processEventLine = (line: string) => { const clean = stripTerminalControl(line); if (!clean.trim()) return; try { const parsed = JSON.parse(clean) as Record<string, unknown>; if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') }; restartInactivity(); options.onStdoutEvent?.(parsed) } catch { /* Ignore non-JSON stdout; stderr is the diagnostic channel. */ } }
     failAfter(options.processStartTimeoutMs ?? OPEN_CODE_TIMEOUTS.processStartMs, 'process-start')
     failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run')
     child.once('spawn', () => { stopTimers(); if (child.pid) options.onProcessStarted?.(child.pid); failAfter(options.firstResponseTimeoutMs ?? OPEN_CODE_TIMEOUTS.firstResponseMs, 'provider-first-response'); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') })
     const abort = () => terminate()
     signal?.addEventListener('abort', abort, { once: true })
     child.stdout.on('data', (data: Buffer) => { const text = data.toString(); stdout += text; eventBuffer += text; const lines = eventBuffer.split(/\r?\n/); eventBuffer = lines.pop() ?? ''; lines.forEach(processEventLine); if (stdout.length > 1_000_000) terminate() })
-    child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); if (/quota|rate[ -]?limit|\b429\b/i.test(stderr) && !runtimeFailure) { runtimeFailure = new OpenCodeFailureError('free-quota-or-rate-limit', redact(stderr)); terminate() }; if (stderr.length > 100_000) terminate() })
+    child.stderr.on('data', (data: Buffer) => { stderr = stripTerminalControl(stderr + data.toString()); if (/quota|rate[ -]?limit|\b429\b/i.test(stderr) && !runtimeFailure) { runtimeFailure = new OpenCodeFailureError('free-quota-or-rate-limit', redact(stderr)); terminate() }; if (stderr.length > 100_000) terminate() })
     child.once('error', (error) => { stopTimers(); options.onProcessError?.(error); reject(error) })
-    child.once('close', (code) => { if (eventBuffer.trim()) processEventLine(eventBuffer); stopTimers(); signal?.removeEventListener('abort', abort); options.onProcessExited?.(code); if (runtimeFailure) return reject(runtimeFailure); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); resolve({ stdout, stderr, code }) })
+    child.once('close', (code) => { if (eventBuffer.trim()) processEventLine(eventBuffer); stopTimers(); signal?.removeEventListener('abort', abort); options.onProcessExited?.(code); if (runtimeFailure) return reject(runtimeFailure); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); if (code !== 0 && !receivedOutput && /(?:database|sqlite).*(?:locked|busy)|(?:locked|busy).*(?:database|sqlite)|SQLITE_BUSY/i.test(stderr)) return reject(new OpenCodeDatabaseBusyError(redact(stderr))); resolve({ stdout: stripTerminalControl(stdout), stderr: stripTerminalControl(stderr), code }) })
     child.stdin.end(input)
   })
+}
+
+export function runOpenCode(executable: string, args: string[], input = '', options: OpenCodeRunOptions = {}) {
+  return withOpenCodeCoordinator(() => runOpenCodeUncoordinated(executable, args, input, options), options.signal)
 }
 
 export function buildAnalysisArgs(modelId: string, workspaceDirectory: string, requestFile: string, variant?: string) {
@@ -188,6 +197,22 @@ export async function discoverProviders(executable: string): Promise<ProviderDto
   return [...connected.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
 
+export async function probeOpenCodeReadiness(executable: string, signal?: AbortSignal, retryDelaysMs = [1_000, 2_000, 4_000], onRetry?: (attempt: number, delayMs: number) => void) {
+  const startedAt = Date.now()
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const models = await discoverModels(executable)
+      const providers = await discoverProviders(executable)
+      return { models, providers, attempts: attempt + 1, elapsedMs: Date.now() - startedAt }
+    } catch (error) {
+      if (!(error instanceof OpenCodeDatabaseBusyError) || attempt >= retryDelaysMs.length) throw error
+      const delay = retryDelaysMs[attempt]
+      onRetry?.(attempt + 1, delay)
+      await new Promise<void>((resolve, reject) => { const timer = setTimeout(resolve, delay); signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('OpenCode analysis was cancelled.')) }, { once: true }) })
+    }
+  }
+}
+
 export function mapOpenCodeProviders(output: string, modelProviderIds: string[] = []): ProviderDto[] {
   const providers = new Map<string, ProviderDto>()
   for (const line of cleanCliOutput(output).split(/\r?\n/).map((value) => value.trim())) { const match = line.match(/^[•*-]\s+(.+?)\s+(api|oauth|env|[A-Z][A-Z0-9_]{2,})$/i); if (match) { const id = match[1].toLowerCase().replace(/\s+/g, '-'); const method = /^(api|oauth)$/i.test(match[2]) ? match[2].toLowerCase() : 'env'; providers.set(id, { id, displayName: match[1], connected: true, connectionMethod: method }) } }
@@ -227,7 +252,8 @@ export function classifyOpenCodeFailure(error: unknown): AnalysisFailureCode {
   if (/quota|rate[ -]?limit|\b429\b/i.test(message)) return 'free-quota-or-rate-limit'
   if (/model.*(?:not found|unavailable)|unknown model/i.test(message)) return 'model-unavailable'
   if (/invalid (?:argument|option)|unknown option/i.test(message)) return 'invalid-opencode-arguments'
-  if (/permission|config(?:uration)?|unsafe runtime|database is locked/i.test(message)) return 'permission-or-configuration-failure'
+  if (/(?:database|sqlite).*(?:locked|busy)|(?:locked|busy).*(?:database|sqlite)|SQLITE_BUSY/i.test(message)) return 'opencode-database-busy'
+  if (/permission|config(?:uration)?|unsafe runtime/i.test(message)) return 'permission-or-configuration-failure'
   if (/spawn|enoent|could not start|executable/i.test(message)) return 'process-startup-failure'
   if (/structured json|return.*json|parse/i.test(message)) return 'parser-failure'
   if (/network|fetch|econn|enotfound|provider/i.test(message)) return 'network-or-provider-failure'
@@ -244,12 +270,13 @@ export function openCodeFailureMessage(code: AnalysisFailureCode) {
     'permission-or-configuration-failure': 'OpenCode runtime safety or configuration could not be confirmed. Analysis was not started.',
     'process-startup-failure': 'OpenCode could not start locally. Check the local OpenCode installation and try again.',
     'parser-failure': 'OpenCode returned an unreadable result. No project changes were made.',
+    'opencode-database-busy': 'OpenCode is busy. Another OpenCode session may currently be using its local database. Wait for it to finish, then check again.',
     unknown: 'OpenCode could not complete the analysis. No project changes were made.',
   }
   return messages[code]
 }
 
-function cleanCliOutput(value: string) { return value.replace(new RegExp(String.fromCharCode(27) + '\\[[0-?]*[ -/]*[@-~]', 'g'), '') }
+function cleanCliOutput(value: string) { return stripTerminalControl(value) }
 
 export function extractOpenCodeText(output: string): string {
   const text: string[] = []
@@ -265,4 +292,14 @@ export function extractOpenCodeText(output: string): string {
 
 export function parseOpenCodeEvents(output: string) { return output.split(/\r?\n/).filter((line) => line.trim()).flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }) }
 
-export function redact(value: string) { return value.replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500) }
+let coordinatorTail = Promise.resolve()
+export async function withOpenCodeCoordinator<T>(work: () => Promise<T>, signal?: AbortSignal) {
+  if (signal?.aborted) throw new Error('OpenCode analysis was cancelled.')
+  let release!: () => void
+  const previous = coordinatorTail
+  coordinatorTail = new Promise<void>((resolve) => { release = resolve })
+  await previous
+  try { if (signal?.aborted) throw new Error('OpenCode analysis was cancelled.'); return await work() } finally { release() }
+}
+
+export function redact(value: string) { return stripTerminalControl(value).replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500) }

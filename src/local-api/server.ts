@@ -12,7 +12,7 @@ import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto, ProviderAuthSessionDto, ProviderAuthState } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
-import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode, sanitizeResearchMetadata } from './opencode'
+import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, probeOpenCodeReadiness, redact, resolveOpenCodeExecutable, runOpenCode, sanitizeResearchMetadata } from './opencode'
 
 type RunRecord = { runId: string; projectId: string; agentId: string; modelId: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; childProcessHandle?: ChildProcess; workspace?: string; requestFile?: string; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed' | 'interrupted'; events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }
 const runs = new Map<string, RunRecord>()
@@ -41,7 +41,8 @@ function analysisFailure(runId: string, modelId: string, error: unknown): Analys
   }
   if (error instanceof Error && error.message.includes('cancelled')) return { type: 'cancelled', error: 'Analysis was cancelled.' }
   const code = classifyOpenCodeFailure(error)
-  return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message: error instanceof Error ? redact(error.message) : 'Analysis failed.', diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp } }
+  const message = code === 'opencode-database-busy' ? 'OpenCode startup was attempted, but its local database was locked. No model response was requested or received.' : error instanceof Error ? redact(error.message) : 'Analysis failed.'
+  return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message, diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp } }
 }
 function recordFailure(runId: string, modelId: string, error: unknown) {
   const run = runs.get(runId); if (!run || run.terminalOutcome) return
@@ -92,7 +93,7 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
   const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, active.source ? 'Local folder' : 'Sample')
   const executable = resolveOpenCodeExecutable(); if (!executable) throw new OpenCodeFailureError('process-startup-failure', 'OpenCode is unavailable.')
   if (!isSafeAnalysisConfig()) throw new OpenCodeFailureError('permission-or-configuration-failure', 'OpenCode runtime safety could not be confirmed. Analysis was not started.')
-  const availableModels = applyProviderAvailability(await discoverModels(executable), await discoverProviders(executable))
+  event(runId, { type: 'preparing-evidence', message: 'Checking OpenCode local readiness before any model request.' }); const readiness = await probeOpenCodeReadiness(executable, active.controller.signal, undefined, (attempt, delay) => event(runId, { type: 'preparing-evidence', message: `OpenCode database is busy; checking again in ${delay / 1_000}s (attempt ${attempt + 1}).` })); event(runId, { type: 'preparing-evidence', message: `OpenCode readiness confirmed in ${readiness.elapsedMs}ms.` }); const availableModels = applyProviderAvailability(readiness.models, readiness.providers)
   const selectedModel = availableModels.find((model) => model.fullId === modelId)
   if (!selectedModel) throw new OpenCodeFailureError('model-unavailable', 'The selected model is not in the current OpenCode catalogue.')
   if (selectedModel.availability === 'requires-provider' || selectedModel.runnable === false) throw new OpenCodeFailureError('provider-authentication-required', 'Connect OpenCode to use this model.')
@@ -166,6 +167,7 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
 export const daemon = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   if (req.method === 'GET' && url.pathname === '/api/runtime/health') return send(res, 200, { status: 'ready', version: '0.1.0' })
+  if (req.method === 'GET' && url.pathname === '/api/opencode/readiness') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: 'process-startup-failure', message: detected.error }); try { const readiness = await probeOpenCodeReadiness(detected.executablePath); return send(res, 200, { ready: true, attempts: readiness.attempts, elapsedMs: readiness.elapsedMs }) } catch (error) { const code = classifyOpenCodeFailure(error); return send(res, 409, { ready: false, error: code, message: openCodeFailureMessage(code) }) } }
   if (req.method === 'GET' && url.pathname === '/api/agents') return send(res, 200, [await detectOpenCode()])
   if (req.method === 'GET' && url.pathname === '/api/agents/opencode/models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { const providers = await discoverProviders(detected.executablePath); return send(res, 200, applyProviderAvailability(await discoverModels(detected.executablePath), providers)) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }
   if (req.method === 'GET' && url.pathname === '/api/agents/opencode/free-models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { return send(res, 200, freeModelIds(await discoverModels(detected.executablePath))) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }

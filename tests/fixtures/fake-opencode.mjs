@@ -7,6 +7,18 @@ const availableModels = (process.env.PROJECT_LENS_FAKE_MODELS ?? 'opencode/deeps
 const finalOutput = process.env.PROJECT_LENS_FAKE_FINAL_OUTPUT ?? '{"version":"1.0","projectName":"Fake project","sourceType":"Sample","overview":{"whatItIs":"Fake"}}'
 const expectedCwd = process.env.PROJECT_LENS_EXPECT_CWD
 const requestMarker = 'project-lens-request-v1'
+const stateFile = process.env.PROJECT_LENS_FAKE_STATE_FILE
+
+async function readinessFailureIfConfigured() {
+  if (!['database-locked-once-then-success', 'database-locked-persistently', 'database-corrupt'].includes(mode)) return
+  if (mode === 'database-corrupt') exitError('\u001b[91m\u001b[1mError:\u001b[0m database disk image is malformed')
+  let attempts = 0
+  if (stateFile) { try { attempts = Number(await readFile(stateFile, 'utf8')) || 0 } catch {} }
+  if (mode === 'database-locked-persistently' || attempts === 0) {
+    if (stateFile) await writeFile(stateFile, String(attempts + 1), 'utf8')
+    exitError('\u001b[91m\u001b[1mError:\u001b[0m database is locked')
+  }
+}
 
 function exitError(message, code = 1) {
   console.error(message)
@@ -80,16 +92,23 @@ process.on('SIGTERM', () => process.exit(0))
 process.on('SIGINT', () => process.exit(0))
 
 if (args[0] === 'models') {
+  await readinessFailureIfConfigured()
   for (const model of availableModels) process.stdout.write(`${model}\n`)
   process.exit(0)
 }
 
 if (args[0] === 'auth' && args[1] === 'list') {
+  await readinessFailureIfConfigured()
   process.stdout.write('• OpenCode api\n')
   process.exit(0)
 }
 
 if (args[0] === 'run') {
+  if (process.env.PROJECT_LENS_FAKE_REQUEST_COUNT_FILE) {
+    let count = 0
+    try { count = Number(await readFile(process.env.PROJECT_LENS_FAKE_REQUEST_COUNT_FILE, 'utf8')) || 0 } catch {}
+    await writeFile(process.env.PROJECT_LENS_FAKE_REQUEST_COUNT_FILE, String(count + 1), 'utf8')
+  }
   await verifyRun(args.slice(1))
   await new Promise((resolve) => setTimeout(resolve, 0))
   process.exit(0)

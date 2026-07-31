@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { analysisEnvironment, buildAnalysisArgs, buildProjectRequestFile, extractOpenCodeText, runOpenCode } from '../src/local-api/opencode'
+import { analysisEnvironment, buildAnalysisArgs, buildProjectRequestFile, extractOpenCodeText, OpenCodeDatabaseBusyError, runOpenCode } from '../src/local-api/opencode'
 import { changedFiles, createProjectAnalysisWorkspace, fileManifest, removeAnalysisWorkspace } from '../src/local-api/analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../src/project-sources/localFolderImport'
 import { runProjectAnalysis } from '../src/analysis'
@@ -154,5 +154,20 @@ describe('OpenCode process harness', () => {
 
     await rm(harness.requestDirectory, { recursive: true, force: true, maxRetries: 3 })
     await removeAnalysisWorkspace(harness.workspace.directory, harness.workspace.source)
+  })
+
+  it('classifies transient and persistent database locks before a run request', async () => {
+    const state = await mkdtemp(path.join(tmpdir(), 'project-lens-lock-'))
+    cleanupDirs.push(state)
+    const stateFile = path.join(state, 'attempts.txt')
+    const requestCount = path.join(state, 'requests.txt')
+    const lockedEnvironment = { ...analysisEnvironment(process.env, true), PROJECT_LENS_FAKE_MODE: 'database-locked-once-then-success', PROJECT_LENS_FAKE_STATE_FILE: stateFile, PROJECT_LENS_FAKE_REQUEST_COUNT_FILE: requestCount }
+    await expect(runOpenCode(fakeExecutable, [fakeScript, 'models'], '', { env: lockedEnvironment, timeoutMs: 500 })).rejects.toBeInstanceOf(OpenCodeDatabaseBusyError)
+    expect(await runOpenCode(fakeExecutable, [fakeScript, 'models'], '', { env: lockedEnvironment, timeoutMs: 500 })).toMatchObject({ code: 0 })
+    expect(await readFile(requestCount, 'utf8').then(Number, () => 0)).toBe(0)
+    const persistentEnvironment = { ...analysisEnvironment(process.env, true), PROJECT_LENS_FAKE_MODE: 'database-locked-persistently', PROJECT_LENS_FAKE_STATE_FILE: path.join(state, 'persistent.txt') }
+    await expect(runOpenCode(fakeExecutable, [fakeScript, 'models'], '', { env: persistentEnvironment, timeoutMs: 500 })).rejects.toBeInstanceOf(OpenCodeDatabaseBusyError)
+    const corruptEnvironment = { ...analysisEnvironment(process.env, true), PROJECT_LENS_FAKE_MODE: 'database-corrupt' }
+    await expect(runOpenCode(fakeExecutable, [fakeScript, 'models'], '', { env: corruptEnvironment, timeoutMs: 500 })).resolves.toMatchObject({ code: 1, stderr: expect.stringContaining('malformed') })
   })
 })

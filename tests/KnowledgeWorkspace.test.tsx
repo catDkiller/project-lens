@@ -83,6 +83,13 @@ describe('presentation knowledge workspace', () => {
     expect(markup).toContain('Activity details')
   })
 
+  it('labels a pre-request database lock as OpenCode busy', () => {
+    const markup = renderToStaticMarkup(<AnalysisProgress modelId="google/gemini-2.5-flash" failed="OpenCode is busy. Another OpenCode session may currently be using its local database." events={[{ type: 'failed', message: 'OpenCode startup was attempted, but its local database was locked. No model response was requested or received.', diagnostic: { code: 'opencode-database-busy', modelId: 'google/gemini-2.5-flash' } }]} onCancel={vi.fn()} onCheckReadiness={vi.fn()} />)
+    expect(markup).toContain('OpenCode is busy')
+    expect(markup).toContain('Check again')
+    expect(markup).not.toContain('Unexpected error')
+  })
+
   it('keeps plain titles and technical names separate', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
     expect(markup).toContain('Moving between screens')

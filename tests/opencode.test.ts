@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl } from '../src/local-api/opencode'
 import { createOpenCodeAgent } from '../src/agents'
 import { createProjectKnowledgeBase } from '../src/knowledge'
 import { runProjectAnalysis } from '../src/analysis'
@@ -62,7 +62,7 @@ describe('OpenCode local adapter', () => {
     expect(classifyOpenCodeFailure(new Error('429 rate limit reached'))).toBe('free-quota-or-rate-limit')
     expect(classifyOpenCodeFailure(new Error('Unknown model'))).toBe('model-unavailable')
     expect(classifyOpenCodeFailure(new Error('Unknown option --agent'))).toBe('invalid-opencode-arguments')
-    expect(classifyOpenCodeFailure(new Error('database is locked'))).toBe('permission-or-configuration-failure')
+    expect(classifyOpenCodeFailure(new Error('database is locked'))).toBe('opencode-database-busy')
     expect(classifyOpenCodeFailure(new Error('spawn ENOENT'))).toBe('process-startup-failure')
     expect(classifyOpenCodeFailure(new Error('OpenCode did not return structured JSON.'))).toBe('parser-failure')
     expect(classifyOpenCodeFailure(new Error('ECONNREFUSED provider'))).toBe('network-or-provider-failure')
@@ -84,6 +84,7 @@ describe('OpenCode local adapter', () => {
   it('uses the final JSON text event and redacts credential-shaped stderr', () => {
     expect(extractOpenCodeText('{"text":"first"}\n{"part":{"text":"{\\"version\\":\\"1.0\\"}"}}')).toBe('{"version":"1.0"}')
     expect(redact('token=secret-value')).toBe('token=[redacted]')
+    expect(stripTerminalControl('\u001b[91m\u001b[1mError:\u001b[0m database is locked')).toBe('Error: database is locked')
   })
 
   it('uses a short positional prompt and an attached request file', () => {
