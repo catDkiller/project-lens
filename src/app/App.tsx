@@ -37,12 +37,13 @@ export function App() {
   const [localProject, setLocalProject] = useState<{ name: string; id: string; files: ProjectFile[]; summary: string; skipped: Record<LocalSkipReason, number> }>()
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
+  const [webResearchEnabled, setWebResearchEnabled] = useState(() => typeof localStorage === 'undefined' ? true : localStorage.getItem('project-lens-web-research') !== 'false')
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', appearance === 'dark')
     document.documentElement.dataset.accent = accent
-    localStorage.setItem('project-lens-appearance', appearance); localStorage.setItem('project-lens-accent', accent)
-  }, [appearance, accent])
+    localStorage.setItem('project-lens-appearance', appearance); localStorage.setItem('project-lens-accent', accent); localStorage.setItem('project-lens-web-research', String(webResearchEnabled))
+  }, [appearance, accent, webResearchEnabled])
 
   useEffect(() => { void loadRuntime() }, [])
   useEffect(() => {
@@ -79,7 +80,7 @@ export function App() {
     setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setLastModel(modelId); setAnalysisStartedAt(Date.now()); setAnalysisEvents([])
     try {
       const endpoint = localProject ? '/api/analysis/local' : '/api/analysis/sample'
-      const body = localProject ? { projectId: localProject.id, name: localProject.name, files: localProject.files, modelId } : { agentId: 'opencode', modelId }
+      const body = localProject ? { projectId: localProject.id, name: localProject.name, files: localProject.files, modelId, webResearchEnabled } : { agentId: 'opencode', modelId, webResearchEnabled }
       const started = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (response) => response.ok ? response.json() as Promise<{ runId: string }> : Promise.reject(await response.json()))
       setRunId(started.runId)
       const stream = new EventSource(`/api/analysis/${started.runId}/events`)
@@ -113,5 +114,5 @@ export function App() {
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
   if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} startedAt={analysisStartedAt} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} onConnectOpenCode={() => void connectProvider('opencode')} />
-  return <Launcher agent={agent} models={models} providers={providers} authSession={authSession} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} onCheckConnection={checkConnection} onCancelConnection={cancelConnection} />
+  return <Launcher agent={agent} models={models} providers={providers} authSession={authSession} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} webResearchEnabled={webResearchEnabled} onAppearance={setAppearance} onAccent={setAccent} onWebResearchEnabled={setWebResearchEnabled} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} onCheckConnection={checkConnection} onCancelConnection={cancelConnection} />
 }

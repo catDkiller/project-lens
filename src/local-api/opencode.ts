@@ -14,19 +14,44 @@ export class OpenCodeFailureError extends Error {
   constructor(code: AnalysisFailureCode, message: string) { super(message); this.code = code; this.name = 'OpenCodeFailureError' }
 }
 
-const analysisPermissions = { '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', task: 'deny', webfetch: 'deny', websearch: 'deny', external_directory: 'deny', question: 'deny', skill: 'deny', todowrite: 'deny' } as const
-
-export const analysisPermissionConfig = {
-  $schema: 'https://opencode.ai/config.json', share: 'disabled', snapshot: false, autoupdate: false, formatter: false, lsp: false, plugin: [],
-  permission: analysisPermissions,
-  agent: { plan: { permission: analysisPermissions } },
+const openCodeCapabilities = {
+  projectRead: true,
+  projectSearch: true,
+  webSearch: true,
+  webFetch: true,
+  streaming: true,
+  structuredOutput: true,
+  modelDiscovery: true,
+  authenticationDetection: true,
+  cancellation: true,
+  readOnlyEnforcement: true,
 } as const
 
-export function analysisEnvironment(env: NodeJS.ProcessEnv = process.env) { return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify(analysisPermissionConfig) } }
+const baseAnalysisPermissions = { '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', task: 'deny', webfetch: 'deny', websearch: 'deny', external_directory: 'deny', question: 'deny', skill: 'deny', todowrite: 'deny' } as const
 
-export function isSafeAnalysisConfig(config: typeof analysisPermissionConfig = analysisPermissionConfig) {
+export function analysisPermissionConfig(webResearchEnabled = true) {
+  const webPermissions = webResearchEnabled ? { webfetch: 'allow', websearch: 'allow' } : { webfetch: 'deny', websearch: 'deny' }
+  const permission = { ...baseAnalysisPermissions, ...webPermissions }
+  return {
+    $schema: 'https://opencode.ai/config.json',
+    share: 'disabled',
+    snapshot: false,
+    autoupdate: false,
+    formatter: false,
+    lsp: false,
+    plugin: [],
+    permission,
+    agent: { plan: { permission } },
+  } as const
+}
+
+export function analysisEnvironment(env: NodeJS.ProcessEnv = process.env, webResearchEnabled = true) { return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify(analysisPermissionConfig(webResearchEnabled)) } }
+
+export function isSafeAnalysisConfig(config: ReturnType<typeof analysisPermissionConfig> = analysisPermissionConfig()) {
   const permissions = config.permission
-  return permissions['*'] === 'deny' && ['read', 'list', 'glob', 'grep'].every((name) => permissions[name as keyof typeof permissions] === 'allow') && ['edit', 'bash', 'task', 'webfetch', 'websearch', 'external_directory', 'question', 'skill', 'todowrite'].every((name) => permissions[name as keyof typeof permissions] === 'deny')
+  const webAllowed = permissions.webfetch === 'allow' && permissions.websearch === 'allow'
+  const webDenied = permissions.webfetch === 'deny' && permissions.websearch === 'deny'
+  return permissions['*'] === 'deny' && ['read', 'list', 'glob', 'grep'].every((name) => permissions[name as keyof typeof permissions] === 'allow') && ['edit', 'bash', 'task', 'external_directory', 'question', 'skill', 'todowrite'].every((name) => permissions[name as keyof typeof permissions] === 'deny') && (webAllowed || webDenied)
 }
 
 export function resolveOpenCodeExecutable(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -96,11 +121,11 @@ export function launchOpenCodeAuth(executable: string, _providerId: string, onCl
 
 export async function detectOpenCode(): Promise<AgentStatusDto> {
   const executablePath = resolveOpenCodeExecutable()
-  if (!executablePath) return { id: 'opencode', displayName: 'OpenCode', installed: false, status: 'unavailable', error: 'OpenCode was not found on PATH.' }
+  if (!executablePath) return { id: 'opencode', displayName: 'OpenCode', installed: false, status: 'unavailable', readiness: 'unavailable', capabilities: openCodeCapabilities, error: 'OpenCode was not found on PATH.' }
   try {
     const result = await runOpenCode(executablePath, ['--version'], '', { timeoutMs: 10_000 })
-    return { id: 'opencode', displayName: 'OpenCode', installed: result.code === 0, executablePath, version: result.stdout.trim(), status: result.code === 0 ? 'available' : 'unavailable', error: result.code === 0 ? undefined : redact(result.stderr) }
-  } catch (error) { return { id: 'opencode', displayName: 'OpenCode', installed: false, executablePath, status: 'unavailable', error: error instanceof Error ? error.message : 'OpenCode could not start.' } }
+    return { id: 'opencode', displayName: 'OpenCode', installed: result.code === 0, executablePath, version: result.stdout.trim(), status: result.code === 0 ? 'available' : 'unavailable', readiness: result.code === 0 ? 'installed' : 'unhealthy', capabilities: openCodeCapabilities, error: result.code === 0 ? undefined : redact(result.stderr) }
+  } catch (error) { return { id: 'opencode', displayName: 'OpenCode', installed: false, executablePath, status: 'unavailable', readiness: 'unavailable', capabilities: openCodeCapabilities, error: error instanceof Error ? error.message : 'OpenCode could not start.' } }
 }
 
 export async function discoverModels(executable: string): Promise<ModelDto[]> {

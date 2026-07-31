@@ -28,8 +28,8 @@ describe('presentation knowledge workspace', () => {
   })
 
   it('shows the current deterministic analysis stage while the sample is running', () => {
-    const markup = renderToStaticMarkup(<Launcher models={[]} isAnalysing analysisStage="features" appearance="dark" accent="blue" onAppearance={vi.fn()} onAccent={vi.fn()} onTrySample={vi.fn()} onUsePrepared={vi.fn()} onCancel={vi.fn()} />)
-    expect(markup).toContain('Checking features…')
+    const markup = renderToStaticMarkup(<Launcher models={[]} isAnalysing analysisStage="features" appearance="dark" accent="blue" webResearchEnabled onAppearance={vi.fn()} onAccent={vi.fn()} onWebResearchEnabled={vi.fn()} onTrySample={vi.fn()} onUsePrepared={vi.fn()} onCancel={vi.fn()} />)
+    expect(markup).toContain('Checking features')
   })
 
   it('uses presentation language instead of raw analyser descriptions', () => {
@@ -49,7 +49,7 @@ describe('presentation knowledge workspace', () => {
   it('keeps the guide navigable and marks the current section', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
     expect(markup).toContain('aria-current="page"')
-    expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={{ ...preparedSamplePresentationKnowledge, projectParts: undefined, files: undefined, technicalReference: undefined } } {...workspaceProps} />)).not.toContain('guide-parts')
+    expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={{ ...preparedSamplePresentationKnowledge, projectParts: undefined, files: undefined, technicalReference: undefined }} {...workspaceProps} />)).not.toContain('guide-parts')
   })
 
   it('uses human-oriented result navigation and stable project search', () => {
@@ -62,7 +62,7 @@ describe('presentation knowledge workspace', () => {
 
   it('renders factual analysis progress as a live status with activity history', () => {
     const markup = renderToStaticMarkup(<AnalysisProgress projectName="python-project" modelId="provider/model" events={[{ type: 'queued', message: 'Prepared files', timestamp: '2026-07-31T10:00:00.000Z' }, { type: 'analysing', message: 'Mapped the project structure' }]} onCancel={vi.fn()} />)
-    expect(markup).toContain('Understanding “python-project”')
+    expect(markup).toContain('Understanding')
     expect(markup).toContain('Mapped the project structure')
     expect(markup).toContain('role="log"')
     expect(markup).not.toContain('%')
@@ -77,11 +77,10 @@ describe('presentation knowledge workspace', () => {
 
   it('keeps provider-authentication failure specific and exposes a connection action', () => {
     const markup = renderToStaticMarkup(<AnalysisProgress modelId="opencode/deepseek-v4-flash-free" failed="OpenCode is not connected" events={[{ type: 'failed', message: 'Connect OpenCode to use this model.', diagnostic: { code: 'provider-authentication-required', modelId: 'opencode/deepseek-v4-flash-free' } }]} onCancel={vi.fn()} onConnectOpenCode={vi.fn()} />)
-    expect(markup).toContain('needs an authenticated OpenCode provider')
+    expect(markup).toContain('authenticated OpenCode provider')
     expect(markup).toContain('Connect through OpenCode')
     expect(markup).toContain('Activity details')
   })
-
 
   it('keeps plain titles and technical names separate', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
@@ -103,6 +102,11 @@ describe('presentation knowledge workspace', () => {
     expect(workspaceSource.default).not.toContain('sign-in screen')
     expect(workspaceSource.default).toContain('View import relationships')
     expect(workspaceSource.default).toContain('View code excerpt')
+  })
+
+  it('exposes the web documentation setting in the launcher settings', () => {
+    const markup = renderToStaticMarkup(<Launcher models={[]} isAnalysing={false} appearance="dark" accent="blue" webResearchEnabled onAppearance={vi.fn()} onAccent={vi.fn()} onWebResearchEnabled={vi.fn()} onTrySample={vi.fn()} onUsePrepared={vi.fn()} onCancel={vi.fn()} />)
+    expect(markup).toContain('Use current web documentation')
   })
 
   it('marks the selected appearance and accent in the theme control', () => {

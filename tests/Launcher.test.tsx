@@ -15,6 +15,7 @@ describe('launcher local import and model selector', () => {
     expect(source).toContain('triggerRef.current?.focus()')
     expect(source).toContain('role="group"')
     expect(source).toContain('title={item.fullId}')
+    expect(source).toContain('Use current web documentation')
   })
 
   it('keeps pointer selection inside the portal and separates highlight from commit', async () => {
@@ -26,5 +27,6 @@ describe('launcher local import and model selector', () => {
     expect(source).toContain('disabled={!canChoose(item)}')
     expect(source).toContain('setModel(item!.fullId)')
     expect(source).toContain('setOpen(false)')
+    expect(source).toContain('Connect ${provider.displayName}')
   })
 })

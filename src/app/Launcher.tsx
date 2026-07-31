@@ -10,8 +10,8 @@ import { ThemeMenu } from './ThemeMenu'
 
 interface LauncherProps {
   agent?: AgentStatusDto; models: ModelDto[]; providers?: ProviderDto[]; authSession?: ProviderAuthSessionDto; runtimeStatus: string; isAnalysing: boolean; analysisStage?: AnalysisStageId; error?: string; appearance: Appearance; accent: Accent
-  selectedProjectName?: string; selectedProjectSummary?: string; selectedProjectSkipped?: Partial<Record<LocalSkipReason, number>>
-  onAppearance: (value: Appearance) => void; onAccent: (value: Accent) => void; onTrySample: (modelId: string) => void; onUsePrepared: () => void; onImportLocal: (name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>) => void; onCancel: () => void
+  selectedProjectName?: string; selectedProjectSummary?: string; selectedProjectSkipped?: Partial<Record<LocalSkipReason, number>>; webResearchEnabled: boolean
+  onAppearance: (value: Appearance) => void; onAccent: (value: Accent) => void; onWebResearchEnabled: (value: boolean) => void; onTrySample: (modelId: string) => void; onUsePrepared: () => void; onImportLocal: (name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>) => void; onCancel: () => void
   onRefreshProviders?: () => void; onRefreshModels?: () => void; onConnectProvider?: (providerId: string) => void; onDisconnectProvider?: (providerId: string) => void; onCheckConnection?: () => void; onCancelConnection?: () => void
 }
 type DirectoryHandle = { name: string; values: () => AsyncIterableIterator<DirectoryHandle | FileSystemFileHandle>; kind: 'directory' }
@@ -22,7 +22,7 @@ async function fromDirectory(handle: DirectoryHandle, prefix = ''): Promise<{ pa
 async function readLocalFiles(entries: { path: string; file: File }[]) { const skippedByReason: Record<LocalSkipReason, number> = { 'dependency-generated': 0, sensitive: 0, 'binary-unsupported': 0, oversized: 0, unsafe: 0 }; const candidates: { path: string; content: string; size: number }[] = []; for (const entry of entries) { const reason = classifyLocalPath(entry.path, entry.file.size); if (!acceptsLocalPath(entry.path, entry.file.size)) { if (reason) skippedByReason[reason]++; continue }; candidates.push({ path: entry.path, content: await entry.file.text(), size: entry.file.size }) }; const prepared = prepareLocalFiles(candidates); for (const key of Object.keys(skippedByReason) as LocalSkipReason[]) skippedByReason[key] += prepared.skippedByReason[key]; return { ...prepared, skipped: Object.values(skippedByReason).reduce((total, count) => total + count, 0), skippedByReason } }
 function FolderIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.5Z" /></svg> }
 
-export function Launcher({ agent, models = [], providers = [], authSession, runtimeStatus = 'Checking local runtime…', isAnalysing, analysisStage, error, appearance, accent, selectedProjectName, selectedProjectSummary, selectedProjectSkipped, onAppearance, onAccent, onTrySample, onUsePrepared, onImportLocal, onCancel, onRefreshProviders = () => {}, onRefreshModels = () => {}, onConnectProvider = () => {}, onDisconnectProvider = () => {}, onCheckConnection = () => {}, onCancelConnection = () => {} }: LauncherProps) {
+export function Launcher({ agent, models = [], providers = [], authSession, runtimeStatus = 'Checking local runtime…', isAnalysing, analysisStage, error, appearance, accent, selectedProjectName, selectedProjectSummary, selectedProjectSkipped, webResearchEnabled, onAppearance, onAccent, onWebResearchEnabled, onTrySample, onUsePrepared, onImportLocal, onCancel, onRefreshProviders = () => {}, onRefreshModels = () => {}, onConnectProvider = () => {}, onDisconnectProvider = () => {}, onCheckConnection = () => {}, onCancelConnection = () => {} }: LauncherProps) {
   const triggerRef = useRef<HTMLButtonElement>(null); const pickerRef = useRef<FolderInput>(null); const restoreFocusRef = useRef(true); const [model, setModel] = useState(() => typeof localStorage === 'undefined' ? '' : localStorage.getItem('project-lens-model') ?? ''); const [open, setOpen] = useState(false); const [query, setQuery] = useState(''); const [highlightedId, setHighlightedId] = useState<string>(); const [folderStatus, setFolderStatus] = useState(''); const [readingFolder, setReadingFolder] = useState(false); const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
   const selected = models.find((item) => item.fullId === model); const canChoose = (item?: ModelDto) => Boolean(item && item.runnable !== false && item.availability !== 'requires-provider' && item.availability !== 'unavailable'); const ready = selected?.runnable === true || selected?.availability === 'available'; const waiting = authSession?.status === 'launching' || authSession?.status === 'waiting-for-user'; const visible = models.filter((item) => `${item.displayName} ${item.providerId} ${item.fullId}`.toLowerCase().includes(query.toLowerCase())); const selectable = visible.filter(canChoose); const skipped = Object.entries(selectedProjectSkipped ?? {}).filter(([, count]) => count)
   useEffect(() => { if (pickerRef.current) pickerRef.current.webkitdirectory = true }, [])
@@ -46,7 +46,112 @@ export function Launcher({ agent, models = [], providers = [], authSession, runt
   const finishFolder = (name: string, prepared: Awaited<ReturnType<typeof readLocalFiles>>) => { if (!prepared.files.length) { setFolderStatus('No supported project text files were found.'); return }; const summary = `${prepared.files.length} included · ${prepared.skipped} skipped · ${(prepared.size / 1024).toFixed(1)} KB`; setFolderStatus(summary); onImportLocal(name, prepared.files, summary, prepared.skippedByReason) }
   async function chooseFolder() { setReadingFolder(true); try { const chooser = (window as Window & { showDirectoryPicker?: () => Promise<DirectoryHandle> }).showDirectoryPicker; if (!chooser) { pickerRef.current?.click(); return }; const directory = await chooser(); finishFolder(directory.name, await readLocalFiles(await fromDirectory(directory))) } catch (reason) { setFolderStatus(reason instanceof DOMException && reason.name === 'AbortError' ? 'Folder selection cancelled.' : 'The folder could not be prepared locally.') } finally { setReadingFolder(false) } }
   async function fallbackFolder(event: React.ChangeEvent<HTMLInputElement>) { setReadingFolder(true); const entries = [...(event.target.files ?? [])].map((file) => ({ path: file.webkitRelativePath || file.name, file })); event.target.value = ''; if (entries.length) finishFolder(entries[0].path.split('/')[0] || 'Local project', await readLocalFiles(entries)); else setFolderStatus('Folder selection cancelled.'); setReadingFolder(false) }
-  const popup = open ? createPortal(<div className="model-popover" style={popupStyle} role="dialog" aria-label="Choose model" onPointerDown={(event) => event.stopPropagation()}><div className="model-popover-controls" role="group"><label htmlFor="modelSearch">Choose a model</label><input id="modelSearch" autoFocus type="search" placeholder="Search provider or model" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { closePopup(); return } if (event.key === 'Tab') { closePopup(false); return } if (event.key === 'ArrowDown') { event.preventDefault(); moveHighlight(1) } if (event.key === 'ArrowUp') { event.preventDefault(); moveHighlight(-1) } if (event.key === 'Home') { event.preventDefault(); setHighlightedId(selectable[0]?.fullId) } if (event.key === 'End') { event.preventDefault(); setHighlightedId(selectable.at(-1)?.fullId) } if (event.key === 'Enter') { event.preventDefault(); choose(visible.find((item) => item.fullId === highlightedId)) } }} /></div><div className="model-results" role="listbox">{visible.map((item) => <button key={item.fullId} className={`model-option${item.fullId === selected?.fullId ? ' selected' : ''}${item.fullId === highlightedId ? ' highlighted' : ''}`} disabled={!canChoose(item)} title={item.fullId} type="button" onPointerMove={() => setHighlightedId(item.fullId)} onFocus={() => setHighlightedId(item.fullId)} onClick={() => choose(item)}><strong>{item.displayName}</strong><span>{item.providerId} · {item.availability === 'requires-provider' ? 'Connection required' : item.fullId}</span></button>)}</div></div>, document.body) : null
+  const popup = open ? createPortal(
+    <div className="model-popover" style={popupStyle} role="dialog" aria-label="Choose model" onPointerDown={(event) => event.stopPropagation()}>
+      <div className="model-popover-controls" role="group">
+        <label htmlFor="modelSearch">Choose a model</label>
+        <input
+          id="modelSearch"
+          autoFocus
+          type="search"
+          placeholder="Search provider or model"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') { closePopup(); return }
+            if (event.key === 'Tab') { closePopup(false); return }
+            if (event.key === 'ArrowDown') { event.preventDefault(); moveHighlight(1) }
+            if (event.key === 'ArrowUp') { event.preventDefault(); moveHighlight(-1) }
+            if (event.key === 'Home') { event.preventDefault(); setHighlightedId(selectable[0]?.fullId) }
+            if (event.key === 'End') { event.preventDefault(); setHighlightedId(selectable.at(-1)?.fullId) }
+            if (event.key === 'Enter') { event.preventDefault(); choose(visible.find((item) => item.fullId === highlightedId)) }
+          }}
+        />
+      </div>
+      <div className="model-results" role="listbox">
+        {visible.map((item) => (
+          <button
+            key={item.fullId}
+            className={`model-option${item.fullId === selected?.fullId ? ' selected' : ''}${item.fullId === highlightedId ? ' highlighted' : ''}`}
+            disabled={!canChoose(item)}
+            title={item.fullId}
+            type="button"
+            onPointerMove={() => setHighlightedId(item.fullId)}
+            onFocus={() => setHighlightedId(item.fullId)}
+            onClick={() => choose(item)}
+          >
+            <strong>{item.displayName}</strong>
+            <span>{item.providerId} · {item.availability === 'requires-provider' ? 'Connection required' : item.fullId}</span>
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
+  ) : null
   const fallback = 'Open a terminal, run opencode, use /connect, choose OpenCode Zen, then complete the official sign-in or API-key flow. Return here and select Check connection.'
-  return <main className="launcher-screen"><header className="launcher-header"><strong className="brand">Project Lens</strong><ThemeMenu appearance={appearance} accent={accent} onAppearance={onAppearance} onAccent={onAccent} /></header><section className="launcher-stage"><div className="launcher-copy-block"><h1>Understand what was built.</h1><p className="launcher-copy">Open a project, see how it fits together, and learn from the implementation.</p></div><div className="lens-launcher" aria-label="Project launcher"><button className="launcher-folder" type="button" onClick={() => void chooseFolder()}><span className="launcher-folder-icon"><FolderIcon /></span><span className="folder-label">{selectedProjectName ?? 'Choose a project folder'}</span></button><input ref={pickerRef} className="folder-input" type="file" multiple onChange={(event) => void fallbackFolder(event)} /><div className="launcher-divider" /><div className="launcher-controls"><button ref={triggerRef} className="model-trigger" type="button" role="combobox" aria-expanded={open} onClick={() => { restoreFocusRef.current = true; setOpen((value) => !value) }}><span>{selected?.displayName ?? (agent?.installed ? 'Choose a model' : 'OpenCode unavailable')}</span></button>{popup}<button className="launcher-analyse" disabled={isAnalysing || waiting || readingFolder || !agent?.installed || !selected || !ready} type="button" onClick={() => selected && onTrySample(selected.fullId)}>{selectedProjectName ? 'Analyse project' : 'Analyse sample'}</button></div></div><p className="privacy-note">Files are prepared locally. Relevant project text may be sent by OpenCode to your selected model provider. Sensitive and ignored files are excluded.</p>{selected && !ready && <p className="folder-status">OpenCode is not connected. Connect OpenCode before using this model.</p>}{waiting && <p className="folder-status">Complete the connection in the OpenCode window. Analysis stays disabled until it is confirmed.</p>}{readingFolder && <p className="folder-status" role="status">Reading folder…</p>}{selectedProjectSummary && <p className="folder-status" role="status">{selectedProjectSummary}</p>}{skipped.length > 0 && <details className="skipped-details"><summary>Review skipped files</summary><ul>{skipped.map(([reason, count]) => <li key={reason}>{count} {reason.replace('-', ' ')}</li>)}</ul></details>}{folderStatus && !selectedProjectSummary && <p className="folder-status" role="status">{folderStatus}</p>}<div className="launcher-footer"><button className="link-sample" type="button" onClick={onUsePrepared}>Use prepared sample →</button><span className="launcher-status">{isAnalysing && analysisStage ? `Checking ${analysisStage}…` : runtimeStatus}</span></div><details className="launcher-settings"><summary>Settings · AI providers</summary><div className="launcher-settings-body"><p>OpenCode owns provider credentials. Project Lens never collects or stores API keys.</p>{providers.map((provider) => <div className="provider-row" key={provider.id}><span>{provider.displayName} · {provider.connected ? 'Connected' : 'Not connected'}</span><button type="button" disabled={waiting && authSession?.providerId === provider.id} onClick={() => provider.connected ? onDisconnectProvider(provider.id) : onConnectProvider(provider.id)}>{provider.connected ? 'Disconnect' : waiting && authSession?.providerId === provider.id ? 'Waiting for connection' : 'Connect through OpenCode'}</button></div>)}{authSession && <div className="provider-connection" role="status"><strong>{authSession.message}</strong><div className="provider-actions"><button type="button" onClick={onCheckConnection}>Check connection</button>{waiting && <button type="button" onClick={onCancelConnection}>Cancel</button>}<button type="button" onClick={() => void navigator.clipboard?.writeText(fallback)}>Copy instructions</button></div></div>}<div className="provider-actions"><button type="button" onClick={onRefreshProviders}>Refresh providers</button><button type="button" onClick={onRefreshModels}>Refresh models</button></div></div></details>{error && <p className="error-state" role="alert">{error}</p>}{isAnalysing && <button className="link-sample" type="button" onClick={onCancel}>Cancel</button>}</section></main>
+  return (
+    <main className="launcher-screen">
+      <header className="launcher-header">
+        <strong className="brand">Project Lens</strong>
+        <ThemeMenu appearance={appearance} accent={accent} onAppearance={onAppearance} onAccent={onAccent} />
+      </header>
+      <section className="launcher-stage">
+        <div className="launcher-copy-block">
+          <h1>Understand what was built.</h1>
+          <p className="launcher-copy">Open a project, see how it fits together, and learn from the implementation.</p>
+        </div>
+        <div className="lens-launcher" aria-label="Project launcher">
+          <button className="launcher-folder" type="button" onClick={() => void chooseFolder()}>
+            <span className="launcher-folder-icon"><FolderIcon /></span>
+            <span className="folder-label">{selectedProjectName ?? 'Choose a project folder'}</span>
+          </button>
+          <input ref={pickerRef} className="folder-input" type="file" multiple onChange={(event) => void fallbackFolder(event)} />
+          <div className="launcher-divider" />
+          <div className="launcher-controls">
+            <button ref={triggerRef} className="model-trigger" type="button" role="combobox" aria-expanded={open} onClick={() => { restoreFocusRef.current = true; setOpen((value) => !value) }}>
+              <span>{selected?.displayName ?? (agent?.installed ? 'Choose a model' : 'OpenCode unavailable')}</span>
+            </button>
+            {popup}
+            <button className="launcher-analyse" disabled={isAnalysing || waiting || readingFolder || !agent?.installed || !selected || !ready} type="button" onClick={() => selected && onTrySample(selected.fullId)}>
+              {selectedProjectName ? 'Analyse project' : 'Analyse sample'}
+            </button>
+          </div>
+        </div>
+        <p className="privacy-note">Files are prepared locally. Relevant project text may be sent by OpenCode to your selected model provider. Sensitive and ignored files are excluded.</p>
+        {selected && !ready && <p className="folder-status">OpenCode is not connected. Connect OpenCode before using this model.</p>}
+        {waiting && <p className="folder-status">Complete the connection in the OpenCode window. Analysis stays disabled until it is confirmed.</p>}
+        {readingFolder && <p className="folder-status" role="status">Reading folder…</p>}
+        {selectedProjectSummary && <p className="folder-status" role="status">{selectedProjectSummary}</p>}
+        {skipped.length > 0 && <details className="skipped-details"><summary>Review skipped files</summary><ul>{skipped.map(([reason, count]) => <li key={reason}>{count} {reason.replace('-', ' ')}</li>)}</ul></details>}
+        {folderStatus && !selectedProjectSummary && <p className="folder-status" role="status">{folderStatus}</p>}
+        <div className="launcher-footer">
+          <button className="link-sample" type="button" onClick={onUsePrepared}>Use prepared sample →</button>
+          <span className="launcher-status">{isAnalysing && analysisStage ? `Checking ${analysisStage}…` : runtimeStatus}</span>
+        </div>
+        <details className="launcher-settings">
+          <summary>Settings · AI providers</summary>
+          <div className="launcher-settings-body">
+            <p>OpenCode owns provider credentials. Project Lens never collects or stores API keys.</p>
+            <label className="launcher-filter">
+              <input type="checkbox" checked={webResearchEnabled} onChange={(event) => onWebResearchEnabled(event.target.checked)} />
+              Use current web documentation
+            </label>
+            <p>Lets the analysis verify frameworks, tools and technical concepts using current documentation.</p>
+            {providers.map((provider) => (
+              <div className="provider-row" key={provider.id}>
+                <span>{provider.displayName} · {provider.connected ? 'Connected' : 'Not connected'}</span>
+                <button type="button" disabled={waiting && authSession?.providerId === provider.id} onClick={() => provider.connected ? onDisconnectProvider(provider.id) : onConnectProvider(provider.id)}>
+                  {provider.connected ? 'Disconnect' : waiting && authSession?.providerId === provider.id ? 'Waiting for connection' : `Connect ${provider.displayName}`}
+                </button>
+              </div>
+            ))}
+            {authSession && <div className="provider-connection" role="status"><strong>{authSession.message}</strong><div className="provider-actions"><button type="button" onClick={onCheckConnection}>Check connection</button>{waiting && <button type="button" onClick={onCancelConnection}>Cancel</button>}<button type="button" onClick={() => void navigator.clipboard?.writeText(fallback)}>Copy instructions</button></div></div>}
+            <div className="provider-actions"><button type="button" onClick={onRefreshProviders}>Refresh providers</button><button type="button" onClick={onRefreshModels}>Refresh models</button></div>
+          </div>
+        </details>
+        {error && <p className="error-state" role="alert">{error}</p>}
+        {isAnalysing && <button className="link-sample" type="button" onClick={onCancel}>Cancel</button>}
+      </section>
+    </main>
+  )
 }

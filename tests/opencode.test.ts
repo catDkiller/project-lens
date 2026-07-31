@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { createOpenCodeAgent } from '../src/agents'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -17,10 +18,11 @@ describe('OpenCode local adapter', () => {
     expect(JSON.stringify(providers)).not.toContain('key')
   })
 
-  it('uses an isolated deny-by-default permission configuration', () => {
+  it('uses an isolated read-only permission configuration with optional web research', () => {
     expect(isSafeAnalysisConfig()).toBe(true)
-    expect(analysisPermissionConfig.permission).toMatchObject({ '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', webfetch: 'deny', task: 'deny', external_directory: 'deny' })
-    expect(JSON.parse(analysisEnvironment({}).OPENCODE_CONFIG_CONTENT!)).toEqual(analysisPermissionConfig)
+    expect(analysisPermissionConfig(true).permission).toMatchObject({ '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', webfetch: 'allow', websearch: 'allow', task: 'deny', external_directory: 'deny' })
+    expect(analysisPermissionConfig(false).permission).toMatchObject({ webfetch: 'deny', websearch: 'deny' })
+    expect(JSON.parse(analysisEnvironment({}, true).OPENCODE_CONFIG_CONTENT!)).toEqual(analysisPermissionConfig(true))
   })
 
   it('lists only IDs explicitly marked free', () => {
@@ -93,5 +95,13 @@ describe('OpenCode local adapter', () => {
   it('keeps debug diagnostics opt-in and separate from normal arguments', () => {
     expect(openCodeDiagnosticArgs(false)).toEqual([])
     expect(openCodeDiagnosticArgs(true)).toEqual(['--print-logs', '--log-level', 'DEBUG'])
+  })
+
+  it('exposes the generic OpenCode adapter contract and capabilities', async () => {
+    const agent = createOpenCodeAgent()
+    expect(agent.id).toBe('opencode')
+    expect(agent.capabilities).toMatchObject({ projectRead: true, webSearch: true, webFetch: true, structuredOutput: true, readOnlyEnforcement: true })
+    expect(agent.readiness).toBe('unavailable')
+    expect(typeof agent.healthCheck).toBe('function')
   })
 })

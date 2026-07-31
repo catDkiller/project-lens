@@ -10,12 +10,14 @@ The product makes agent-created project structure legible: it starts from a proj
 
 ## Current MVP
 
+- Generic agent-adapter contract with OpenCode as the first real adapter.
 - OpenCode detection and real configured-model discovery through a loopback-only local runtime.
 - Analyse the prepared React/Vite sample with a selected OpenCode model, then validate its structured result before opening the existing workspace.
 - Use the committed prepared presentation as a clearly separate no-AI fallback.
 - Run deterministic inventory, static-import, relationship, and project-part analysis.
-- Transform the result into one reusable project knowledge base used by Overview, Complete Guide, Project parts, Technologies, Files, and Decisions views.
+- Transform the result into one reusable project knowledge base used by Overview, Guide, Explore, and Review views.
 - Switch between accessible light/dark themes and accent tokens.
+- Keep current web documentation available as a toggled, read-only analysis capability.
 - Deploy a public, no-login static site.
 
 The prepared sample is the guaranteed demo. Sources normalize into the same project shape so local-folder and GitHub adapters can be added later without changing the learning workspace.
@@ -23,7 +25,6 @@ The prepared sample is the guaranteed demo. Sources normalize into the same proj
 ## Postponed features
 
 - Local-folder access and GitHub URL fetching.
-- GitHub URL fetching.
 - Other CLI adapters, Codex API calls, authentication, persistence, database, routing, and automatic refactoring.
 - Frameworks beyond React/Vite.
 

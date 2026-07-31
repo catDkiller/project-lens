@@ -1,11 +1,14 @@
 import type { PresentationKnowledgeBase } from '../knowledge'
 
-export interface AgentStatusDto { id: 'opencode'; displayName: 'OpenCode'; installed: boolean; executablePath?: string; version?: string; status: 'available' | 'unavailable'; error?: string }
+export type AgentReadinessDto = 'unavailable' | 'installed' | 'needs-authentication' | 'ready' | 'unhealthy'
+export interface AgentCapabilitiesDto { projectRead: boolean; projectSearch: boolean; webSearch: boolean; webFetch: boolean; streaming: boolean; structuredOutput: boolean; modelDiscovery: boolean; authenticationDetection: boolean; cancellation: boolean; readOnlyEnforcement: boolean }
+export interface AgentStatusDto { id: string; displayName: string; installed: boolean; executablePath?: string; version?: string; status: 'available' | 'unavailable'; readiness?: AgentReadinessDto; authenticationStatus?: 'disconnected' | 'launching' | 'waiting-for-user' | 'connected' | 'cancelled' | 'launch-failed' | 'verification-failed'; authenticationMethod?: string; capabilities?: AgentCapabilitiesDto; error?: string }
 export interface ProviderDto { id: string; displayName: string; connected: boolean; connectionMethod?: string }
 export type ProviderAuthState = 'disconnected' | 'launching' | 'waiting-for-user' | 'connected' | 'cancelled' | 'terminal-closed-before-completion' | 'launch-failed' | 'verification-failed'
 export interface ProviderAuthSessionDto { id: string; providerId: string; status: ProviderAuthState; message: string; startedAt: string; command?: string }
 export type ModelAvailability = 'available' | 'ready' | 'requires-provider' | 'unavailable' | 'unknown'
-export interface ModelDto { providerId: string; modelId: string; fullId: string; displayName: string; availability: ModelAvailability; free?: boolean; connected?: boolean; runnable?: boolean; availabilityReason?: string; local?: boolean; variant?: string }
+export type ModelReadinessDto = 'catalogue-only' | 'requires-provider' | 'ready' | 'temporarily-unavailable' | 'removed' | 'unknown'
+export interface ModelDto { providerId: string; modelId: string; fullId: string; displayName: string; availability: ModelAvailability; readiness?: ModelReadinessDto; free?: boolean; connected?: boolean; runnable?: boolean; availabilityReason?: string; local?: boolean; variant?: string }
 export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'starting-agent' | 'analysing' | 'validating' | 'completed' | 'failed' | 'cancelled'
 export type AnalysisFailureCode = 'provider-authentication-required' | 'free-quota-or-rate-limit' | 'model-unavailable' | 'network-or-provider-failure' | 'invalid-opencode-arguments' | 'permission-or-configuration-failure' | 'process-startup-failure' | 'parser-failure' | 'unknown'
 export interface AnalysisEventDto { type: AnalysisEventType; message?: string; timestamp?: string; path?: string; diagnostic?: { code?: AnalysisFailureCode; timeoutType?: string; exitCode?: number | null; stderr?: string; modelId?: string; lastActivity?: string }; result?: PresentationKnowledgeBase; error?: string }
