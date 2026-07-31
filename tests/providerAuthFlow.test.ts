@@ -27,4 +27,11 @@ describe('provider authentication flow', () => {
     expect(launcher).toContain('Copy instructions')
     expect(launcher).toContain('Analysis stays disabled until it is confirmed.')
   })
+
+  it('keeps the portalled model popup positioned by the trigger', async () => {
+    const launcher = await readFile(new URL('../src/app/Launcher.tsx', import.meta.url), 'utf8')
+    expect(launcher).toContain('useLayoutEffect')
+    expect(launcher).toContain('setPopupStyle({ top, left, width')
+    expect(launcher).toContain('style={popupStyle}')
+  })
 })
