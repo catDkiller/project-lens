@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -34,6 +34,30 @@ describe('OpenCode local adapter', () => {
     ])
     expect(models[0]).toMatchObject({ availability: 'ready', runnable: true })
     expect(models[1]).toMatchObject({ availability: 'requires-provider', runnable: false })
+  })
+
+  it('does not treat a free catalogue suffix as provider readiness', () => {
+    const [model] = applyProviderAvailability(mapOpenCodeModels('opencode/deepseek-v4-flash-free'), [{ id: 'opencode', displayName: 'OpenCode', connected: false }])
+    expect(model).toMatchObject({ fullId: 'opencode/deepseek-v4-flash-free', availability: 'requires-provider', runnable: false })
+    expect(canStartOpenCodeAnalysis(model)).toBe(false)
+  })
+
+  it('marks a connected OpenCode provider as ready', () => {
+    const [model] = applyProviderAvailability(mapOpenCodeModels('opencode/deepseek-v4-flash-free'), [{ id: 'opencode', displayName: 'OpenCode', connected: true }])
+    expect(model).toMatchObject({ availability: 'ready', runnable: true })
+    expect(canStartOpenCodeAnalysis(model)).toBe(true)
+  })
+
+  it('maps known failures to specific, safe recovery categories', () => {
+    expect(classifyOpenCodeFailure(new OpenCodeFailureError('provider-authentication-required', 'Connect OpenCode to use this model.'))).toBe('provider-authentication-required')
+    expect(classifyOpenCodeFailure(new Error('429 rate limit reached'))).toBe('free-quota-or-rate-limit')
+    expect(classifyOpenCodeFailure(new Error('Unknown model'))).toBe('model-unavailable')
+    expect(classifyOpenCodeFailure(new Error('Unknown option --agent'))).toBe('invalid-opencode-arguments')
+    expect(classifyOpenCodeFailure(new Error('database is locked'))).toBe('permission-or-configuration-failure')
+    expect(classifyOpenCodeFailure(new Error('spawn ENOENT'))).toBe('process-startup-failure')
+    expect(classifyOpenCodeFailure(new Error('OpenCode did not return structured JSON.'))).toBe('parser-failure')
+    expect(classifyOpenCodeFailure(new Error('ECONNREFUSED provider'))).toBe('network-or-provider-failure')
+    expect(openCodeFailureMessage('provider-authentication-required')).toContain('authenticated OpenCode provider')
   })
 
   it('parses ANSI OpenCode auth output without exposing credentials', () => {

@@ -11,7 +11,7 @@ import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
-import { analysisEnvironment, applyProviderAvailability, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
+import { analysisEnvironment, applyProviderAvailability, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
 
 const runs = new Map<string, { events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }>()
 const completedCache = new Map<string, PresentationKnowledgeBase>()
@@ -23,7 +23,9 @@ function event(runId: string, next: AnalysisEventDto) { runs.get(runId)?.events.
 function analysisFailure(runId: string, modelId: string, error: unknown): AnalysisEventDto {
   const last = runs.get(runId)?.events.at(-1)
   if (error instanceof OpenCodeTimeoutError) return { type: 'failed', error: 'OpenCode did not respond in time.', message: `Stopped after ${last?.message ?? 'starting OpenCode'}.`, diagnostic: { timeoutType: error.timeoutType, stderr: redact(error.message), modelId, lastActivity: last?.timestamp } }
-  return { type: error instanceof Error && error.message.includes('cancelled') ? 'cancelled' : 'failed', error: error instanceof Error ? redact(error.message) : 'Analysis failed.' }
+  if (error instanceof Error && error.message.includes('cancelled')) return { type: 'cancelled', error: 'Analysis was cancelled.' }
+  const code = classifyOpenCodeFailure(error)
+  return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message: error instanceof Error ? redact(error.message) : 'Analysis failed.', diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp } }
 }
 async function sampleProject() {
   const files = ['src/main.tsx', 'src/App.tsx', 'src/components/AppHeader.tsx', 'src/pages/LoginPage.tsx', 'src/components/LoginForm.tsx', 'src/services/authService.ts', 'src/pages/DashboardPage.tsx', 'src/components/MetricCard.tsx', 'src/utils/formatDate.ts']
@@ -58,10 +60,13 @@ async function runAnalysis(runId: string, modelId: string, variant?: string) {
   if (cached) { event(runId, { type: 'completed', result: cached }); return }
   const analysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, status) => { if (status === 'running') event(runId, { type: 'analysing', message: `Running deterministic ${stage} analysis.` }) }, 0)
   const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, active.source ? 'Local folder' : 'Sample')
-  const executable = resolveOpenCodeExecutable(); if (!executable) throw new Error('OpenCode is unavailable.')
-  if (!isSafeAnalysisConfig()) throw new Error('OpenCode runtime safety could not be confirmed. Analysis was not started.')
+  const executable = resolveOpenCodeExecutable(); if (!executable) throw new OpenCodeFailureError('process-startup-failure', 'OpenCode is unavailable.')
+  if (!isSafeAnalysisConfig()) throw new OpenCodeFailureError('permission-or-configuration-failure', 'OpenCode runtime safety could not be confirmed. Analysis was not started.')
   const availableModels = applyProviderAvailability(await discoverModels(executable), await discoverProviders(executable))
-  if (!availableModels.some((model) => model.fullId === modelId && (model.availability === 'ready' || model.availability === 'available') && model.runnable !== false)) throw new Error(`The selected model is not runnable. Connect its provider, refresh models, and choose again.`)
+  const selectedModel = availableModels.find((model) => model.fullId === modelId)
+  if (!selectedModel) throw new OpenCodeFailureError('model-unavailable', 'The selected model is not in the current OpenCode catalogue.')
+  if (selectedModel.availability === 'requires-provider' || selectedModel.runnable === false) throw new OpenCodeFailureError('provider-authentication-required', 'Connect OpenCode to use this model.')
+  if (!canStartOpenCodeAnalysis(selectedModel)) throw new OpenCodeFailureError('permission-or-configuration-failure', 'Provider readiness could not be confirmed. Analysis was not started.')
   const workspace = active.source ? await createProjectAnalysisWorkspace(project.files) : await createAnalysisWorkspace(sampleRoot)
   event(runId, { type: 'starting-agent' }); event(runId, { type: 'analysing' })
   const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspace.directory]

@@ -1,13 +1,17 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import type { AgentStatusDto, ModelAvailability, ModelDto, ProviderDto } from './contracts'
+import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelDto, ProviderDto } from './contracts'
 
 export interface OpenCodeExecutable { path: string; version: string }
 export interface OpenCodeRunResult { stdout: string; stderr: string; code: number | null }
 export type OpenCodeTimeoutType = 'process-start' | 'provider-first-response' | 'inactivity' | 'total-run'
 export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number }
 export class OpenCodeTimeoutError extends Error { readonly timeoutType: OpenCodeTimeoutType; constructor(timeoutType: OpenCodeTimeoutType) { super(`OpenCode timed out (${timeoutType}).`); this.timeoutType = timeoutType; this.name = 'OpenCodeTimeoutError' } }
+export class OpenCodeFailureError extends Error {
+  readonly code: AnalysisFailureCode
+  constructor(code: AnalysisFailureCode, message: string) { super(message); this.code = code; this.name = 'OpenCodeFailureError' }
+}
 
 const analysisPermissions = { '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', task: 'deny', webfetch: 'deny', websearch: 'deny', external_directory: 'deny', question: 'deny', skill: 'deny', todowrite: 'deny' } as const
 
@@ -123,7 +127,41 @@ export function applyProviderAvailability(models: ModelDto[], providers: Provide
   })
 }
 
+/** The final local gate before `opencode run`; catalogue membership is insufficient. */
+export function canStartOpenCodeAnalysis(model: ModelDto | undefined) { return model?.availability === 'ready' && model.runnable === true }
+
 export function freeModelIds(models: ModelDto[]) { return models.filter((model) => model.free === true).map((model) => model.fullId) }
+
+/** Maps only known, redacted runtime failures to a user-safe category. */
+export function classifyOpenCodeFailure(error: unknown): AnalysisFailureCode {
+  if (error instanceof OpenCodeFailureError) return error.code
+  if (error instanceof OpenCodeTimeoutError) return 'network-or-provider-failure'
+  const message = error instanceof Error ? error.message : String(error)
+  if (/auth(?:entication)?|credential|not connected|connect this provider/i.test(message)) return 'provider-authentication-required'
+  if (/quota|rate[ -]?limit|\b429\b/i.test(message)) return 'free-quota-or-rate-limit'
+  if (/model.*(?:not found|unavailable)|unknown model/i.test(message)) return 'model-unavailable'
+  if (/invalid (?:argument|option)|unknown option/i.test(message)) return 'invalid-opencode-arguments'
+  if (/permission|config(?:uration)?|unsafe runtime|database is locked/i.test(message)) return 'permission-or-configuration-failure'
+  if (/spawn|enoent|could not start|executable/i.test(message)) return 'process-startup-failure'
+  if (/structured json|return.*json|parse/i.test(message)) return 'parser-failure'
+  if (/network|fetch|econn|enotfound|provider/i.test(message)) return 'network-or-provider-failure'
+  return 'unknown'
+}
+
+export function openCodeFailureMessage(code: AnalysisFailureCode) {
+  const messages: Record<AnalysisFailureCode, string> = {
+    'provider-authentication-required': 'This model is provided through OpenCode and needs an authenticated OpenCode provider before it can run.',
+    'free-quota-or-rate-limit': 'The selected provider reported a quota or rate-limit problem. Wait and try again, or choose another ready model.',
+    'model-unavailable': 'The selected model is no longer available from its provider. Refresh models and choose another one.',
+    'network-or-provider-failure': 'OpenCode could not reach the selected provider. Check the provider connection and try again.',
+    'invalid-opencode-arguments': 'Project Lens could not start OpenCode with the selected model. Choose another model or refresh the runtime.',
+    'permission-or-configuration-failure': 'OpenCode runtime safety or configuration could not be confirmed. Analysis was not started.',
+    'process-startup-failure': 'OpenCode could not start locally. Check the local OpenCode installation and try again.',
+    'parser-failure': 'OpenCode returned an unreadable result. No project changes were made.',
+    unknown: 'OpenCode could not complete the analysis. No project changes were made.',
+  }
+  return messages[code]
+}
 
 function cleanCliOutput(value: string) { return value.replace(new RegExp(String.fromCharCode(27) + '\\[[0-?]*[ -/]*[@-~]', 'g'), '') }
 

@@ -75,6 +75,13 @@ describe('presentation knowledge workspace', () => {
     expect(markup).not.toContain('%')
   })
 
+  it('keeps provider-authentication failure specific and exposes a connection action', () => {
+    const markup = renderToStaticMarkup(<AnalysisProgress modelId="opencode/deepseek-v4-flash-free" failed="OpenCode is not connected" events={[{ type: 'failed', message: 'Connect OpenCode to use this model.', diagnostic: { code: 'provider-authentication-required', modelId: 'opencode/deepseek-v4-flash-free' } }]} onCancel={vi.fn()} onConnectOpenCode={vi.fn()} />)
+    expect(markup).toContain('needs an authenticated OpenCode provider')
+    expect(markup).toContain('Connect through OpenCode')
+    expect(markup).toContain('Activity details')
+  })
+
 
   it('keeps plain titles and technical names separate', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
