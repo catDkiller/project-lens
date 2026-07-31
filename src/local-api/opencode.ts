@@ -69,12 +69,15 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
   })
 }
 
-export function launchOpenCodeAuth(executable: string, providerId: string, onClose: (code: number | null) => void, onError: (error: Error) => void) {
+export function launchOpenCodeAuth(executable: string, _providerId: string, onClose: (code: number | null) => void, onError: (error: Error) => void) {
   const isWindows = process.platform === 'win32'
-  const command = `opencode auth login ${providerId}`
+  // OpenCode 1.18.5 treats the positional auth argument as a URL/provider
+  // selector. Launch the normal TUI instead so the user can choose OpenCode
+  // Zen through `/connect` without Project Lens guessing a CLI argument.
+  const command = 'opencode'
   const child = isWindows
-    ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'start', '"Project Lens OpenCode connection"', '/wait', executable, 'auth', 'login', providerId], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
-    : spawn(executable, ['auth', 'login', providerId], { cwd: process.cwd(), shell: false, detached: true, stdio: 'ignore' })
+    ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'start', '"Project Lens OpenCode connection"', '/wait', 'cmd.exe', '/k', executable], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
+    : spawn(executable, [], { cwd: process.cwd(), shell: false, detached: true, stdio: 'ignore' })
   child.once('close', onClose)
   child.once('error', onError)
   child.unref()

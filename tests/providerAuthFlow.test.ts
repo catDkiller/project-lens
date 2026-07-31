@@ -10,6 +10,7 @@ describe('provider authentication flow', () => {
   })
 
   it('uses a non-blocking tracked session with verification, cancellation, and no analysis launch', async () => {
+    const opencode = await readFile(new URL('../src/local-api/opencode.ts', import.meta.url), 'utf8')
     const server = await readFile(new URL('../src/local-api/server.ts', import.meta.url), 'utf8')
     const app = await readFile(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
     const launcher = await readFile(new URL('../src/app/Launcher.tsx', import.meta.url), 'utf8')
@@ -17,6 +18,10 @@ describe('provider authentication flow', () => {
     expect(server).toContain('verifyAuthSession')
     expect(server).toContain("session.status = 'cancelled'")
     expect(server).toContain("'terminal-closed-before-completion'")
+    expect(opencode).toContain("const command = 'opencode'")
+    expect(opencode).toContain("'/wait', 'cmd.exe', '/k', executable")
+    expect(opencode).not.toContain("'auth', 'login', providerId")
+    expect(opencode).not.toContain('auth login ${providerId}')
     expect(app).toContain('auth-sessions/${id}')
     expect(launcher).toContain('Check connection')
     expect(launcher).toContain('Copy instructions')
