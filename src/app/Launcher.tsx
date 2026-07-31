@@ -134,7 +134,8 @@ export function Launcher({ agent, models = [], providers = [], authSession, runt
             <p>OpenCode owns provider credentials. Project Lens never collects or stores API keys.</p>
             <label className="launcher-filter">
               <input type="checkbox" checked={webResearchEnabled} onChange={(event) => onWebResearchEnabled(event.target.checked)} />
-              Use current web documentation
+              <span>Use current web documentation</span>
+              <strong>{webResearchEnabled ? 'On' : 'Off'}</strong>
             </label>
             <p>Lets the analysis verify frameworks, tools and technical concepts using current documentation.</p>
             {providers.map((provider) => (

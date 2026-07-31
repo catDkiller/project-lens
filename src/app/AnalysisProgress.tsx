@@ -14,6 +14,14 @@ interface AnalysisProgressProps {
 }
 
 function formatDuration(milliseconds: number) { const seconds = Math.floor(milliseconds / 1000); return seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s` }
+function webResearchLabel(value?: string) {
+  if (value === 'used-successfully') return 'Documentation was used.'
+  if (value === 'attempted-but-unavailable') return 'Documentation was unavailable; project-only analysis completed.'
+  if (value === 'failed') return 'Documentation failed; project-only analysis completed.'
+  if (value === 'configured') return 'Documentation was configured.'
+  if (value === 'not-requested') return 'Documentation was not needed.'
+  return ''
+}
 
 export function AnalysisProgress({ projectName = 'project', modelId, events, startedAt = Date.now(), failed, onCancel, onRetry, onChooseModel, onConnectOpenCode }: AnalysisProgressProps) {
   const [now, setNow] = useState(Date.now())
@@ -32,6 +40,8 @@ export function AnalysisProgress({ projectName = 'project', modelId, events, sta
       <dt>Diagnostic code</dt><dd>{latest.diagnostic.code ?? 'timeout'}</dd>
       {latest.diagnostic.exitCode !== undefined && <><dt>Exit code</dt><dd>{latest.diagnostic.exitCode ?? 'not available'}</dd></>}
       {latest.diagnostic.timeoutType && <><dt>Timeout type</dt><dd>{latest.diagnostic.timeoutType}</dd></>}
+      {latest.diagnostic.webResearchOutcome && <><dt>Web research</dt><dd>{webResearchLabel(latest.diagnostic.webResearchOutcome)}</dd></>}
+      {latest.diagnostic.webResearchSource && <><dt>Web source</dt><dd>{latest.diagnostic.webResearchSource.title} · {latest.diagnostic.webResearchSource.url}</dd></>}
       {latest.diagnostic.stderr && <><dt>Runtime detail</dt><dd>{latest.diagnostic.stderr}</dd></>}
     </dl>}
   </div></details>
