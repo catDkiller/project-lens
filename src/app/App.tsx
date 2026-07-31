@@ -7,7 +7,7 @@ import { createProjectKnowledgeBase, createPresentationFallback, validatePresent
 import type { PresentationKnowledgeBase } from '../knowledge'
 import { preparedSamplePresentationKnowledge } from '../fixtures/preparedSamplePresentationKnowledge'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
-import type { AgentStatusDto, AnalysisEventDto, ModelDto } from '../local-api/contracts'
+import type { AgentStatusDto, AnalysisEventDto, ModelDto, ProviderDto } from '../local-api/contracts'
 import { Launcher } from './Launcher'
 import { KnowledgeWorkspace } from './KnowledgeWorkspace'
 import type { Accent, Appearance } from './ThemeMenu'
@@ -22,6 +22,7 @@ export function App() {
   const [analysisStage, setAnalysisStage] = useState<AnalysisStageId>()
   const [agent, setAgent] = useState<AgentStatusDto>()
   const [models, setModels] = useState<ModelDto[]>([])
+  const [providers, setProviders] = useState<ProviderDto[]>([])
   const [runtimeStatus, setRuntimeStatus] = useState('Checking local runtime…')
   const [runId, setRunId] = useState<string>()
   const [lastModel, setLastModel] = useState<string>()
@@ -42,7 +43,9 @@ export function App() {
       if (!detected?.installed) { setRuntimeStatus(detected?.error ?? 'OpenCode is unavailable. Install and configure OpenCode, then restart Project Lens.'); return }
       setRuntimeStatus('Loading OpenCode models…')
       const discovered = await fetch('/api/agents/opencode/models').then(async (response) => response.ok ? response.json() as Promise<ModelDto[]> : Promise.reject(await response.json()))
-      setModels(discovered); setRuntimeStatus(discovered.length ? 'OpenCode detected' : 'No configured models. Configure a provider in OpenCode, then restart Project Lens.')
+      setModels(discovered)
+      const discoveredProviders = await fetch('/api/opencode/providers').then(async (response) => response.ok ? response.json() as Promise<ProviderDto[]> : Promise.resolve([]))
+      setProviders(discoveredProviders); setRuntimeStatus(discovered.length ? 'OpenCode detected' : 'No configured models. Configure a provider in OpenCode, then restart Project Lens.')
     } catch { setRuntimeStatus('Project Lens could not reach its local runtime. Run npm run dev and try again.') }
   }
 
@@ -75,7 +78,11 @@ export function App() {
   }
 
   async function cancelAnalysis() { if (runId) await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
+  async function refreshProviders() { const response = await fetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()) }
+  async function refreshModels() { const response = await fetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
+  async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json(); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
+  async function disconnectProvider(providerId: string) { await fetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
   function returnToLauncher() { setKnowledge(null); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
-  return <Launcher agent={agent} models={models} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onCancel={cancelAnalysis} />
+  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
 }

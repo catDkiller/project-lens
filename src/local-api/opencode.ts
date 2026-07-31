@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import type { AgentStatusDto, ModelDto } from './contracts'
+import type { AgentStatusDto, ModelDto, ProviderDto } from './contracts'
 
 export interface OpenCodeExecutable { path: string; version: string }
 export interface OpenCodeRunResult { stdout: string; stderr: string; code: number | null }
@@ -74,15 +74,34 @@ export async function discoverModels(executable: string): Promise<ModelDto[]> {
   return mapOpenCodeModels(result.stdout)
 }
 
+export async function discoverProviders(executable: string): Promise<ProviderDto[]> {
+  const [auth, models] = await Promise.all([runOpenCode(executable, ['auth', 'list'], '', { timeoutMs: 15_000 }), discoverModels(executable)])
+  if (auth.code !== 0) throw new Error(redact(auth.stderr) || 'OpenCode could not list providers.')
+  const connected = new Map<string, ProviderDto>()
+  for (const line of auth.stdout.split(/\r?\n/).map((value) => value.trim())) {
+    const match = line.match(/^[•*-]\s+(.+?)\s+(api|oauth|env)$/i)
+    if (match) { const id = match[1].toLowerCase().replace(/\s+/g, '-'); connected.set(id, { id, displayName: match[1], connected: true, connectionMethod: match[2].toLowerCase() }) }
+  }
+  for (const model of models) if (!connected.has(model.providerId)) connected.set(model.providerId, { id: model.providerId, displayName: model.providerId, connected: false })
+  return [...connected.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+export function mapOpenCodeProviders(output: string, modelProviderIds: string[] = []): ProviderDto[] {
+  const providers = new Map<string, ProviderDto>()
+  for (const line of output.split(/\r?\n/).map((value) => value.trim())) { const match = line.match(/^[•*-]\s+(.+?)\s+(api|oauth|env)$/i); if (match) { const id = match[1].toLowerCase().replace(/\s+/g, '-'); providers.set(id, { id, displayName: match[1], connected: true, connectionMethod: match[2].toLowerCase() }) } }
+  for (const id of modelProviderIds) if (!providers.has(id)) providers.set(id, { id, displayName: id, connected: false })
+  return [...providers.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
 export function mapOpenCodeModels(output: string): ModelDto[] {
   return [...new Set(output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))].map((fullId) => {
     const [providerId, ...rest] = fullId.split('/')
     const modelId = rest.join('/')
-    return { providerId, modelId, fullId, displayName: modelId || fullId, availability: 'available' }
+    return { providerId, modelId, fullId, displayName: modelId || fullId, availability: 'available', free: fullId.includes(':free'), local: /^(ollama|lmstudio|local)(\/|$)/i.test(providerId) }
   })
 }
 
-export function freeModelIds(models: ModelDto[]) { return models.filter((model) => model.fullId.includes(':free')).map((model) => model.fullId) }
+export function freeModelIds(models: ModelDto[]) { return models.filter((model) => model.free === true).map((model) => model.fullId) }
 
 export function extractOpenCodeText(output: string): string {
   const text: string[] = []

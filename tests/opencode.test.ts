@@ -5,9 +5,16 @@ import { analysisEnvironment, analysisPermissionConfig, extractOpenCodeText, fre
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
     expect(mapOpenCodeModels('provider-a/fast\nprovider-b/careful\nprovider-a/fast\n')).toEqual([
-      { providerId: 'provider-a', modelId: 'fast', fullId: 'provider-a/fast', displayName: 'fast', availability: 'available' },
-      { providerId: 'provider-b', modelId: 'careful', fullId: 'provider-b/careful', displayName: 'careful', availability: 'available' },
+      { providerId: 'provider-a', modelId: 'fast', fullId: 'provider-a/fast', displayName: 'fast', availability: 'available', free: false, local: false },
+      { providerId: 'provider-b', modelId: 'careful', fullId: 'provider-b/careful', displayName: 'careful', availability: 'available', free: false, local: false },
     ])
+  })
+
+  it('parses connected providers without credential values', async () => {
+    const { mapOpenCodeProviders } = await import('../src/local-api/opencode')
+    const providers = mapOpenCodeProviders('• Google api\n• OpenRouter env\n', ['ollama'])
+    expect(providers).toEqual([{ id: 'google', displayName: 'Google', connected: true, connectionMethod: 'api' }, { id: 'ollama', displayName: 'ollama', connected: false }, { id: 'openrouter', displayName: 'OpenRouter', connected: true, connectionMethod: 'env' }])
+    expect(JSON.stringify(providers)).not.toContain('key')
   })
 
   it('uses an isolated deny-by-default permission configuration', () => {
