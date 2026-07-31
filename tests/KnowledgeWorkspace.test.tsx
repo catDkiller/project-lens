@@ -5,6 +5,7 @@ import { App } from '../src/app/App'
 import { KnowledgeWorkspace } from '../src/app/KnowledgeWorkspace'
 import { Launcher } from '../src/app/Launcher'
 import { ThemeMenu } from '../src/app/ThemeMenu'
+import { AnalysisProgress } from '../src/app/AnalysisProgress'
 import { preparedSampleFeatureDefinitions } from '../src/fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleLearningPacks } from '../src/fixtures/preparedSampleLearningPacks'
 import { preparedSamplePresentationKnowledge } from '../src/fixtures/preparedSamplePresentationKnowledge'
@@ -49,6 +50,22 @@ describe('presentation knowledge workspace', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
     expect(markup).toContain('aria-current="page"')
     expect(renderToStaticMarkup(<KnowledgeWorkspace knowledge={{ ...preparedSamplePresentationKnowledge, projectParts: undefined, files: undefined, technicalReference: undefined } } {...workspaceProps} />)).not.toContain('guide-parts')
+  })
+
+  it('uses human-oriented result navigation and stable project search', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)
+    expect(markup).toContain('Guide</button>')
+    expect(markup).toContain('Explore</button>')
+    expect(markup).toContain('Review</button>')
+    expect(markup).not.toContain('Technologies</button>')
+  })
+
+  it('renders factual analysis progress as a live status with activity history', () => {
+    const markup = renderToStaticMarkup(<AnalysisProgress projectName="python-project" modelId="provider/model" events={[{ type: 'queued', message: 'Prepared files', timestamp: '2026-07-31T10:00:00.000Z' }, { type: 'analysing', message: 'Mapped the project structure' }]} onCancel={vi.fn()} />)
+    expect(markup).toContain('Understanding “python-project”')
+    expect(markup).toContain('Mapped the project structure')
+    expect(markup).toContain('role="log"')
+    expect(markup).not.toContain('%')
   })
 
 
