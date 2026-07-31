@@ -15,6 +15,8 @@
 .analysis-stage-row.done { color: var(--success); }
 .analysis-stage-row span { font-size: .8rem; width: 1rem; }
 .analysis-current { color: var(--fg-secondary); margin: 1.25rem 0 .45rem; }
+.analysis-meta { color: var(--muted); font-size: .82rem; margin: .35rem 0; }
+.analysis-stalled { background: var(--accent-light); border-radius: var(--radius-sm); color: var(--fg-secondary); font-size: .88rem; margin: 1rem 0 .4rem; padding: .65rem .75rem; }
 .analysis-model { color: var(--muted); font-size: .82rem; }
 .analysis-actions { align-items: center; display: flex; gap: .65rem; margin-top: 1rem; }
 .analysis-failure { border-left: 3px solid var(--danger); padding-left: 1rem; }

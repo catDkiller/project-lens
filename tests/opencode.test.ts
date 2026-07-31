@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -38,6 +38,10 @@ describe('OpenCode local adapter', () => {
 
   it('parses ANSI OpenCode auth output without exposing credentials', () => {
     expect(mapOpenCodeProviders('\u001b[34m•\u001b[39m Google \u001b[90mapi\u001b[39m', [])).toMatchObject([{ id: 'google', connected: true }])
+  })
+
+  it('keeps the timeout phase available for recovery messaging', () => {
+    expect(new OpenCodeTimeoutError('provider-first-response')).toMatchObject({ timeoutType: 'provider-first-response' })
   })
 
   it('leaves an unavailable PATH unresolved', () => {

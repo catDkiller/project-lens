@@ -30,4 +30,14 @@ describe('local project import', () => {
     ])
     expect(prepared).toMatchObject({ files: [{ path: 'src/App.tsx', content: 'one' }], skipped: 3 })
   })
+
+  it('records safe skipped-file categories without retaining secret contents', () => {
+    const prepared = prepareLocalFiles([
+      { path: 'node_modules/react/index.js', content: 'ignored', size: 7 },
+      { path: 'src/.env.local', content: 'SECRET=value', size: 12 },
+      { path: 'image.png', content: 'binary', size: 6 },
+    ])
+    expect(prepared.skippedByReason).toMatchObject({ 'dependency-generated': 1, sensitive: 1, 'binary-unsupported': 1 })
+    expect(JSON.stringify(prepared)).not.toContain('SECRET=value')
+  })
 })

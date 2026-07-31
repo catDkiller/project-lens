@@ -68,6 +68,13 @@ describe('presentation knowledge workspace', () => {
     expect(markup).not.toContain('%')
   })
 
+  it('shows elapsed and stalled status from event timestamps without inventing progress', () => {
+    const markup = renderToStaticMarkup(<AnalysisProgress projectName="python-project" startedAt={Date.now() - 40_000} modelId="provider/model" events={[{ type: 'analysing', message: 'Inspecting src/app.ts', timestamp: new Date(Date.now() - 40_000).toISOString() }]} onCancel={vi.fn()} />)
+    expect(markup).toContain('Elapsed:')
+    expect(markup).toContain('Still waiting for the selected provider')
+    expect(markup).not.toContain('%')
+  })
+
 
   it('keeps plain titles and technical names separate', () => {
     const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={preparedSamplePresentationKnowledge} {...workspaceProps} />)

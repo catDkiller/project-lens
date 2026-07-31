@@ -9,6 +9,7 @@ import { preparedSamplePresentationKnowledge } from '../fixtures/preparedSampleP
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
 import { localFolderProjectSource } from '../project-sources/LocalFolderProjectSource'
 import type { ProjectFile } from '../project-sources/types'
+import type { LocalSkipReason } from '../project-sources/localFolderImport'
 import type { AgentStatusDto, AnalysisEventDto, ModelDto, ProviderDto } from '../local-api/contracts'
 import { Launcher } from './Launcher'
 import { AnalysisProgress } from './AnalysisProgress'
@@ -29,9 +30,10 @@ export function App() {
   const [runtimeStatus, setRuntimeStatus] = useState('Checking local runtime…')
   const [runId, setRunId] = useState<string>()
   const [analysisEvents, setAnalysisEvents] = useState<AnalysisEventDto[]>([])
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number>()
   const [lastModel, setLastModel] = useState<string>()
   const [projectNotice, setProjectNotice] = useState<string>()
-  const [localProject, setLocalProject] = useState<{ name: string; id: string; files: ProjectFile[]; summary: string }>()
+  const [localProject, setLocalProject] = useState<{ name: string; id: string; files: ProjectFile[]; summary: string; skipped: Record<LocalSkipReason, number> }>()
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
 
@@ -57,7 +59,7 @@ export function App() {
 
   async function openPreparedSample() {
     setLocalProject(undefined); setProjectNotice(undefined)
-    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setAnalysisEvents([{ type: 'queued', message: 'Preparing the sample project.' }])
+    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setAnalysisStartedAt(Date.now()); setAnalysisEvents([{ type: 'queued', message: 'Preparing the sample project.' }])
     try {
       const project = await bundledSampleProjectSource.load()
       const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, status) => { if (status === 'running') { setAnalysisStage(stage); setAnalysisEvents((current) => [...current, { type: 'analysing', message: analysisStages.find((item) => item.id === stage)?.label ?? stage }]) } }, 120)
@@ -68,7 +70,7 @@ export function App() {
   }
 
   async function analyseWithOpenCode(modelId: string) {
-    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setLastModel(modelId); setAnalysisEvents([])
+    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setLastModel(modelId); setAnalysisStartedAt(Date.now()); setAnalysisEvents([])
     try {
       const endpoint = localProject ? '/api/analysis/local' : '/api/analysis/sample'
       const body = localProject ? { projectId: localProject.id, name: localProject.name, files: localProject.files, modelId } : { agentId: 'opencode', modelId }
@@ -89,10 +91,10 @@ export function App() {
     } catch (reason) { setRunId(undefined); setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'Analysis could not start.'); setMode('failed') }
   }
 
-  async function importLocalProject(name: string, files: ProjectFile[]) {
+  async function importLocalProject(name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>) {
     const project = await localFolderProjectSource(name, files).load()
-    setLocalProject({ name: project.name, id: project.id, files: project.files, summary: `${project.files.length} files included.` })
-    setError(undefined); setAnalysisStage(undefined); setProjectNotice(`${project.files.length} files included.`); setMode('launcher')
+    setLocalProject({ name: project.name, id: project.id, files: project.files, summary, skipped })
+    setError(undefined); setAnalysisStage(undefined); setProjectNotice(summary); setMode('launcher')
   }
 
   async function cancelAnalysis() { if (runId) await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
@@ -102,6 +104,6 @@ export function App() {
   async function disconnectProvider(providerId: string) { await fetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
-  if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} />
-  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
+  if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} startedAt={analysisStartedAt} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} />
+  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
 }
