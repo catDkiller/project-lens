@@ -8,12 +8,13 @@ import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeat
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
 import { createPresentationFallback, createProjectExplanationRequest, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
-import type { AnalysisEventDto } from './contracts'
+import type { AnalysisEventDto, ProviderAuthSessionDto, ProviderAuthState } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
 import { analysisEnvironment, applyProviderAvailability, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
 
 const runs = new Map<string, { events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }>()
+const authSessions = new Map<string, ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean }>()
 const completedCache = new Map<string, PresentationKnowledgeBase>()
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
 const DETERMINISTIC_ANALYSIS_VERSION = '1'
@@ -26,6 +27,24 @@ function analysisFailure(runId: string, modelId: string, error: unknown): Analys
   if (error instanceof Error && error.message.includes('cancelled')) return { type: 'cancelled', error: 'Analysis was cancelled.' }
   const code = classifyOpenCodeFailure(error)
   return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message: error instanceof Error ? redact(error.message) : 'Analysis failed.', diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp } }
+}
+function authSession(providerId: string, status: ProviderAuthState, message: string, command?: string): ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean } {
+  const session = { id: randomUUID(), providerId, status, message, startedAt: new Date().toISOString(), command }
+  authSessions.set(session.id, session)
+  return session
+}
+async function verifyAuthSession(session: ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean }) {
+  if (['cancelled', 'connected', 'launch-failed', 'verification-failed'].includes(session.status)) return session
+  const executable = resolveOpenCodeExecutable()
+  if (!executable) { session.status = 'verification-failed'; session.message = 'OpenCode could not be found to verify the connection.'; return session }
+  try {
+    const providers = await discoverProviders(executable)
+    if (providers.some((provider) => provider.id === session.providerId && provider.connected)) { session.status = 'connected'; session.message = 'OpenCode connected. You can now analyse the project.'; return session }
+    if (session.terminalClosed) { session.status = 'terminal-closed-before-completion'; session.message = 'The OpenCode window closed before the provider was connected.'; return session }
+    if (Date.now() - new Date(session.startedAt).getTime() > 5 * 60_000) { session.status = 'verification-failed'; session.message = 'No provider connection was detected. You can check again or choose another model.'; return session }
+    session.status = 'waiting-for-user'; session.message = 'Complete the connection in the OpenCode window.'
+  } catch { session.status = 'verification-failed'; session.message = 'Project Lens could not verify the OpenCode connection. Check the connection and try again.' }
+  return session
 }
 async function sampleProject() {
   const files = ['src/main.tsx', 'src/App.tsx', 'src/components/AppHeader.tsx', 'src/pages/LoginPage.tsx', 'src/components/LoginForm.tsx', 'src/services/authService.ts', 'src/pages/DashboardPage.tsx', 'src/components/MetricCard.tsx', 'src/utils/formatDate.ts']
@@ -103,11 +122,26 @@ export const daemon = createServer(async (req, res) => {
   if (req.method === 'GET' && (url.pathname === '/api/opencode/models' || url.pathname === '/api/opencode/providers')) { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { const providers = await discoverProviders(detected.executablePath); return send(res, 200, url.pathname.endsWith('/models') ? applyProviderAvailability(await discoverModels(detected.executablePath), providers) : providers) } catch (error) { return send(res, 502, { error: error instanceof Error ? redact(error instanceof Error ? error.message : String(error)) : 'OpenCode discovery failed.' }) } }
   if (req.method === 'POST' && url.pathname === '/api/analysis/local') { let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 2_000_000) return send(res, 413, { error: 'Import is too large.' }) } try { const parsed = JSON.parse(body) as { projectId?: string; name?: string; files?: { path: string; content: string }[]; modelId?: string }; if (!parsed.projectId?.startsWith('local-') || !parsed.modelId) return send(res, 400, { error: 'A local project ID and model are required.' }); const prepared = prepareLocalFiles((parsed.files ?? []).map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength }))); if (!prepared.files.length) return send(res, 400, { error: 'No supported project text files were included.' }); const project = localProject(parsed.name ?? 'Local project', prepared.files); const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); const available = applyProviderAvailability(await discoverModels(detected.executablePath), await discoverProviders(detected.executablePath)); if (!available.some((model) => model.fullId === parsed.modelId && model.availability === 'ready')) return send(res, 409, { error: 'The selected provider is not connected. Connect it in OpenCode, then refresh models.' }); if ([...runs.values()].some((run) => !run.events.some((item) => ['completed', 'failed', 'cancelled'].includes(item.type)))) return send(res, 409, { error: 'An analysis is already running.' }); const runId = randomUUID(); runs.set(runId, { events: [{ type: 'queued', message: `Reading ${prepared.files.length} project files.` }], controller: new AbortController(), project, source: 'local' }); void runAnalysis(runId, parsed.modelId).catch((error) => event(runId, analysisFailure(runId, parsed.modelId!, error))); return send(res, 202, { runId, projectId: project.id, included: prepared.files.length, skipped: prepared.skipped, size: prepared.size }) } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Local project import failed.' }) } }
   if (req.method === 'POST' && url.pathname === '/api/projects/local') { let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 2_000_000) return send(res, 413, { error: 'Import is too large.' }) } try { return send(res, 200, await analyseLocalProject(JSON.parse(body))) } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Local project import failed.' }) } }
+  const authMatch = url.pathname.match(/^\/api\/opencode\/auth-sessions\/([^/]+)$/)
+  if (authMatch) {
+    const session = authSessions.get(authMatch[1]); if (!session) return send(res, 404, { error: 'Unknown authentication session.' })
+    if (req.method === 'GET') return send(res, 200, await verifyAuthSession(session))
+    if (req.method === 'POST') { session.status = 'cancelled'; session.message = 'Connection check cancelled. OpenCode was not changed.'; return send(res, 200, session) }
+  }
   if (req.method === 'POST' && (url.pathname === '/api/opencode/providers/connect' || url.pathname === '/api/opencode/providers/disconnect')) {
     let body = ''; for await (const chunk of req) body += chunk; let parsed: { providerId?: string }; try { parsed = JSON.parse(body) } catch { return send(res, 400, { error: 'Invalid request body.' }) }
     const executable = resolveOpenCodeExecutable(); if (!executable || !parsed.providerId || !/^[a-z0-9][a-z0-9._-]{0,80}$/i.test(parsed.providerId)) return send(res, 400, { error: 'Invalid provider.' })
     const providers = await discoverProviders(executable); if (!providers.some((provider) => provider.id === parsed.providerId)) return send(res, 404, { error: 'Provider is not in OpenCode’s discovered catalogue.' })
-    if (url.pathname.endsWith('/connect')) { try { return send(res, 200, launchOpenCodeAuth(executable, parsed.providerId)) } catch (error) { return send(res, 502, { error: redact(error instanceof Error ? error.message : 'OpenCode authentication could not start.') }) } }
+    if (url.pathname.endsWith('/connect')) {
+      const existing = [...authSessions.values()].find((session) => session.providerId === parsed.providerId && ['launching', 'waiting-for-user'].includes(session.status))
+      if (existing) return send(res, 200, existing)
+      const session = authSession(parsed.providerId, 'launching', 'Launching the OpenCode connection window.')
+      try {
+        const launch = launchOpenCodeAuth(executable, parsed.providerId, () => { const current = authSessions.get(session.id); if (current && current.status === 'waiting-for-user') current.terminalClosed = true }, () => { const current = authSessions.get(session.id); if (current) { current.status = 'launch-failed'; current.message = 'OpenCode authentication could not start. Use the connection instructions instead.' } })
+        session.processId = launch.pid; session.command = launch.command; session.status = 'waiting-for-user'; session.message = 'Complete the connection in the OpenCode window.'
+        return send(res, 202, session)
+      } catch (error) { session.status = 'launch-failed'; session.message = 'OpenCode authentication could not start. Use the connection instructions instead.'; return send(res, 502, { ...session, error: redact(error instanceof Error ? error.message : 'OpenCode authentication could not start.') }) }
+    }
     const result = await runOpenCode(executable, ['auth', 'logout', parsed.providerId], '', { timeoutMs: 15_000 }); if (result.code !== 0) return send(res, 502, { error: redact(result.stderr) || 'Provider disconnect failed.' }); return send(res, 200, { status: 'disconnected' })
   }
   if (req.method === 'POST' && url.pathname === '/api/analysis/sample') { let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 5_000) return send(res, 413, { error: 'Request is too large.' }) } let parsed: { agentId?: string; modelId?: string; variant?: string }; try { parsed = JSON.parse(body) } catch { return send(res, 400, { error: 'Invalid request body.' }) } if (parsed.agentId !== 'opencode' || !parsed.modelId || parsed.modelId.includes('..') || parsed.modelId.length > 240 || (parsed.variant !== undefined && (typeof parsed.variant !== 'string' || parsed.variant.length > 80))) return send(res, 400, { error: 'Only an OpenCode model for the prepared sample is allowed.' }); if ([...runs.values()].some((run) => !run.events.some((item) => ['completed', 'failed', 'cancelled'].includes(item.type)))) return send(res, 409, { error: 'One sample analysis is already running.' }); const runId = randomUUID(); runs.set(runId, { events: [{ type: 'queued' }], controller: new AbortController() }); void runAnalysis(runId, parsed.modelId, parsed.variant).catch((error) => event(runId, analysisFailure(runId, parsed.modelId!, error))); return send(res, 202, { runId }) }

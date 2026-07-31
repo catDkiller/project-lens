@@ -10,7 +10,7 @@ import { bundledSampleProjectSource } from '../project-sources/BundledSampleProj
 import { localFolderProjectSource } from '../project-sources/LocalFolderProjectSource'
 import type { ProjectFile } from '../project-sources/types'
 import type { LocalSkipReason } from '../project-sources/localFolderImport'
-import type { AgentStatusDto, AnalysisEventDto, ModelDto, ProviderDto } from '../local-api/contracts'
+import type { AgentStatusDto, AnalysisEventDto, ModelDto, ProviderAuthSessionDto, ProviderDto } from '../local-api/contracts'
 import { Launcher } from './Launcher'
 import { AnalysisProgress } from './AnalysisProgress'
 import { KnowledgeWorkspace } from './KnowledgeWorkspace'
@@ -27,6 +27,7 @@ export function App() {
   const [agent, setAgent] = useState<AgentStatusDto>()
   const [models, setModels] = useState<ModelDto[]>([])
   const [providers, setProviders] = useState<ProviderDto[]>([])
+  const [authSession, setAuthSession] = useState<ProviderAuthSessionDto>()
   const [runtimeStatus, setRuntimeStatus] = useState('Checking local runtime…')
   const [runId, setRunId] = useState<string>()
   const [analysisEvents, setAnalysisEvents] = useState<AnalysisEventDto[]>([])
@@ -44,6 +45,11 @@ export function App() {
   }, [appearance, accent])
 
   useEffect(() => { void loadRuntime() }, [])
+  useEffect(() => {
+    if (!authSession || authSession.status !== 'waiting-for-user') return
+    const timer = window.setInterval(() => { void checkConnection(authSession.id) }, 3_000)
+    return () => window.clearInterval(timer)
+  }, [authSession])
   async function loadRuntime() {
     try {
       const agents = await fetch('/api/agents').then(async (response) => response.ok ? response.json() as Promise<AgentStatusDto[]> : Promise.reject())
@@ -100,10 +106,12 @@ export function App() {
   async function cancelAnalysis() { if (runId) await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
   async function refreshProviders() { const response = await fetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()); await refreshModels() }
   async function refreshModels() { const response = await fetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
-  async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json(); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.'); if (response.ok) { for (let attempt = 0; attempt < 6; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 1500)); await refreshProviders() } } }
+  async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json() as ProviderAuthSessionDto & { error?: string }; if (response.ok) setAuthSession(result); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
+  async function checkConnection(id = authSession?.id) { if (!id) return; const response = await fetch(`/api/opencode/auth-sessions/${id}`); const session = await response.json() as ProviderAuthSessionDto; if (!response.ok) { setRuntimeStatus('Project Lens could not verify the OpenCode connection.'); return }; setAuthSession(session); setRuntimeStatus(session.message); if (session.status === 'connected') { await refreshProviders(); await refreshModels() } }
+  async function cancelConnection() { if (!authSession) return; const response = await fetch(`/api/opencode/auth-sessions/${authSession.id}`, { method: 'POST' }); if (response.ok) { const session = await response.json() as ProviderAuthSessionDto; setAuthSession(session); setRuntimeStatus(session.message) } }
   async function disconnectProvider(providerId: string) { await fetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
   if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} startedAt={analysisStartedAt} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} onConnectOpenCode={() => void connectProvider('opencode')} />
-  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
+  return <Launcher agent={agent} models={models} providers={providers} authSession={authSession} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} onCheckConnection={checkConnection} onCancelConnection={cancelConnection} />
 }

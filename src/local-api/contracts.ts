@@ -2,6 +2,8 @@ import type { PresentationKnowledgeBase } from '../knowledge'
 
 export interface AgentStatusDto { id: 'opencode'; displayName: 'OpenCode'; installed: boolean; executablePath?: string; version?: string; status: 'available' | 'unavailable'; error?: string }
 export interface ProviderDto { id: string; displayName: string; connected: boolean; connectionMethod?: string }
+export type ProviderAuthState = 'disconnected' | 'launching' | 'waiting-for-user' | 'connected' | 'cancelled' | 'terminal-closed-before-completion' | 'launch-failed' | 'verification-failed'
+export interface ProviderAuthSessionDto { id: string; providerId: string; status: ProviderAuthState; message: string; startedAt: string; command?: string }
 export type ModelAvailability = 'available' | 'ready' | 'requires-provider' | 'unavailable' | 'unknown'
 export interface ModelDto { providerId: string; modelId: string; fullId: string; displayName: string; availability: ModelAvailability; free?: boolean; connected?: boolean; runnable?: boolean; availabilityReason?: string; local?: boolean; variant?: string }
 export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'starting-agent' | 'analysing' | 'validating' | 'completed' | 'failed' | 'cancelled'

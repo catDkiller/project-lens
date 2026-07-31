@@ -69,10 +69,16 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
   })
 }
 
-export function launchOpenCodeAuth(executable: string, providerId: string) {
-  const child = spawn(executable, ['auth', 'login', providerId], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
+export function launchOpenCodeAuth(executable: string, providerId: string, onClose: (code: number | null) => void, onError: (error: Error) => void) {
+  const isWindows = process.platform === 'win32'
+  const command = `opencode auth login ${providerId}`
+  const child = isWindows
+    ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'start', '"Project Lens OpenCode connection"', '/wait', executable, 'auth', 'login', providerId], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
+    : spawn(executable, ['auth', 'login', providerId], { cwd: process.cwd(), shell: false, detached: true, stdio: 'ignore' })
+  child.once('close', onClose)
+  child.once('error', onError)
   child.unref()
-  return { status: 'started' as const, message: 'Complete the connection in the OpenCode window.', command: `opencode auth login ${providerId}` }
+  return { pid: child.pid, command }
 }
 
 export async function detectOpenCode(): Promise<AgentStatusDto> {
