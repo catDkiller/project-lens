@@ -1,4 +1,5 @@
 import type { PresentationKnowledgeBase } from '../knowledge'
+export type WebResearchOutcome = 'not-requested' | 'configured' | 'used-successfully' | 'attempted-but-unavailable' | 'failed'
 
 export type AgentReadinessDto = 'unavailable' | 'installed' | 'needs-authentication' | 'ready' | 'unhealthy'
 export interface AgentCapabilitiesDto { projectRead: boolean; projectSearch: boolean; webSearch: boolean; webFetch: boolean; streaming: boolean; structuredOutput: boolean; modelDiscovery: boolean; authenticationDetection: boolean; cancellation: boolean; readOnlyEnforcement: boolean }
@@ -11,5 +12,5 @@ export type ModelReadinessDto = 'catalogue-only' | 'requires-provider' | 'ready'
 export interface ModelDto { providerId: string; modelId: string; fullId: string; displayName: string; availability: ModelAvailability; readiness?: ModelReadinessDto; free?: boolean; connected?: boolean; runnable?: boolean; availabilityReason?: string; local?: boolean; variant?: string }
 export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'starting-agent' | 'analysing' | 'validating' | 'completed' | 'failed' | 'cancelled'
 export type AnalysisFailureCode = 'provider-authentication-required' | 'free-quota-or-rate-limit' | 'model-unavailable' | 'network-or-provider-failure' | 'invalid-opencode-arguments' | 'permission-or-configuration-failure' | 'process-startup-failure' | 'parser-failure' | 'unknown'
-export interface AnalysisEventDto { type: AnalysisEventType; message?: string; timestamp?: string; path?: string; diagnostic?: { code?: AnalysisFailureCode; timeoutType?: string; exitCode?: number | null; stderr?: string; modelId?: string; lastActivity?: string }; result?: PresentationKnowledgeBase; error?: string }
+export interface AnalysisEventDto { type: AnalysisEventType; message?: string; timestamp?: string; path?: string; diagnostic?: { code?: AnalysisFailureCode; timeoutType?: string; exitCode?: number | null; stderr?: string; modelId?: string; lastActivity?: string; webResearchOutcome?: WebResearchOutcome; webResearchSource?: { title: string; url: string } }; result?: PresentationKnowledgeBase; error?: string }
 export interface AnalysisStartDto { runId: string }

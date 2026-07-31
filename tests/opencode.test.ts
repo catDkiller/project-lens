@@ -1,7 +1,12 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata } from '../src/local-api/opencode'
 import { createOpenCodeAgent } from '../src/agents'
+import { createProjectKnowledgeBase } from '../src/knowledge'
+import { runProjectAnalysis } from '../src/analysis'
+import { preparedSampleFeatureDefinitions } from '../src/fixtures/preparedSampleFeatureDefinitions'
+import { preparedSampleLearningPacks } from '../src/fixtures/preparedSampleLearningPacks'
+import { preparedViteSample } from '../src/fixtures/preparedViteSample'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -23,6 +28,8 @@ describe('OpenCode local adapter', () => {
     expect(analysisPermissionConfig(true).permission).toMatchObject({ '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', webfetch: 'allow', websearch: 'allow', task: 'deny', external_directory: 'deny' })
     expect(analysisPermissionConfig(false).permission).toMatchObject({ webfetch: 'deny', websearch: 'deny' })
     expect(JSON.parse(analysisEnvironment({}, true).OPENCODE_CONFIG_CONTENT!)).toEqual(analysisPermissionConfig(true))
+    expect(analysisEnvironment({}, true).OPENCODE_ENABLE_EXA).toBe('1')
+    expect(analysisEnvironment({}, false).OPENCODE_ENABLE_EXA).toBeUndefined()
   })
 
   it('lists only IDs explicitly marked free', () => {
@@ -81,10 +88,31 @@ describe('OpenCode local adapter', () => {
 
   it('uses a short positional prompt and an attached request file', () => {
     const args = buildAnalysisArgs('google/gemini-2.5-pro', 'C:/temp/workspace', 'C:/temp/workspace/.project-lens-request.json')
-    expect(args).toContain('--file')
-    expect(args).toContain('C:/temp/workspace/.project-lens-request.json')
-    expect(args.at(-1)).toBe('Read the attached Project Lens request and return only the required JSON.')
-    expect(args.join(' ').length).toBeLessThan(1_000)
+    expect(args).toEqual(['run', '--format', 'json', '--agent', 'plan', '--model', 'google/gemini-2.5-pro', '--dir', 'C:/temp/workspace', '--file', 'C:/temp/workspace/.project-lens-request.json', OPEN_CODE_RUN_PROMPT])
+  })
+
+  it('builds a versioned request file with schema, evidence, limitations, and web preference', async () => {
+    const analysis = await runProjectAnalysis(preparedViteSample, preparedSampleFeatureDefinitions, () => {})
+    const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks)
+    const request = JSON.parse(buildProjectRequestFile(raw, true)) as Record<string, unknown>
+    expect(request).toMatchObject({
+      schemaMarker: 'project-lens-request-v1',
+      promptVersion: '1.0',
+      explanationSchema: 'PresentationKnowledgeBase',
+      webResearchPreference: 'enabled',
+    })
+    expect(Array.isArray(request.evidenceIds)).toBe(true)
+    expect(Array.isArray(request.projectLimitations)).toBe(true)
+    expect(sanitizeResearchMetadata('C:\\secret\\path\napi_key=abc123')).not.toContain('\n')
+  })
+
+  it('builds a cache basis from project, agent, model, variant, and prompt version', () => {
+    const basis = buildAnalysisCacheBasis({ id: 'local-demo', name: 'Local demo' }, 'opencode', 'opencode/deepseek-v4-flash-free', 'sample')
+    expect(basis).toContain('"projectId":"local-demo"')
+    expect(basis).toContain('"agentId":"opencode"')
+    expect(basis).toContain('"modelId":"opencode/deepseek-v4-flash-free"')
+    expect(basis).toContain('"promptVersion":"1.0"')
+    expect(buildAnalysisCacheKey({ id: 'local-demo', name: 'Local demo' }, 'opencode', 'opencode/deepseek-v4-flash-free', 'sample')).toHaveLength(64)
   })
 
   it('uses phase-aware timeout defaults and parses fragmented-safe NDJSON lines', () => {

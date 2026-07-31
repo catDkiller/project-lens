@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { PROJECT_EXPLANATION_PROMPT_VERSION, PROJECT_EXPLANATION_SYSTEM_PROMPT } from '../knowledge'
+import type { ProjectKnowledgeBase } from '../knowledge'
 import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelDto, ProviderDto } from './contracts'
 
 export interface OpenCodeExecutable { path: string; version: string }
@@ -8,6 +11,8 @@ export interface OpenCodeRunResult { stdout: string; stderr: string; code: numbe
 export type OpenCodeTimeoutType = 'process-start' | 'provider-first-response' | 'inactivity' | 'total-run'
 export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number; onStdoutEvent?: (event: Record<string, unknown>) => void }
 export const OPEN_CODE_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 4 * 60_000, inactivityMs: 2 * 60_000, totalRunMs: 10 * 60_000 } as const
+export const PROJECT_LENS_REQUEST_SCHEMA_MARKER = 'project-lens-request-v1'
+export const OPEN_CODE_RUN_PROMPT = 'Read the attached Project Lens request, inspect the approved project when needed, and return only the required structured JSON.'
 export class OpenCodeTimeoutError extends Error { readonly timeoutType: OpenCodeTimeoutType; constructor(timeoutType: OpenCodeTimeoutType) { super(`OpenCode timed out (${timeoutType}).`); this.timeoutType = timeoutType; this.name = 'OpenCodeTimeoutError' } }
 export class OpenCodeFailureError extends Error {
   readonly code: AnalysisFailureCode
@@ -45,13 +50,48 @@ export function analysisPermissionConfig(webResearchEnabled = true) {
   } as const
 }
 
-export function analysisEnvironment(env: NodeJS.ProcessEnv = process.env, webResearchEnabled = true) { return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify(analysisPermissionConfig(webResearchEnabled)) } }
+export function analysisEnvironment(env: NodeJS.ProcessEnv = process.env, webResearchEnabled = true) {
+  const next: NodeJS.ProcessEnv = { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify(analysisPermissionConfig(webResearchEnabled)) }
+  if (webResearchEnabled) next.OPENCODE_ENABLE_EXA = '1'
+  return next
+}
 
 export function isSafeAnalysisConfig(config: ReturnType<typeof analysisPermissionConfig> = analysisPermissionConfig()) {
   const permissions = config.permission
   const webAllowed = permissions.webfetch === 'allow' && permissions.websearch === 'allow'
   const webDenied = permissions.webfetch === 'deny' && permissions.websearch === 'deny'
   return permissions['*'] === 'deny' && ['read', 'list', 'glob', 'grep'].every((name) => permissions[name as keyof typeof permissions] === 'allow') && ['edit', 'bash', 'task', 'external_directory', 'question', 'skill', 'todowrite'].every((name) => permissions[name as keyof typeof permissions] === 'deny') && (webAllowed || webDenied)
+}
+
+export function buildAnalysisCacheBasis(project: Pick<ProjectKnowledgeBase, 'id' | 'name'>, agentId: string, modelId: string, variant?: string) {
+  return JSON.stringify({ projectId: project.id, projectName: project.name, agentId, modelId, variant, promptVersion: PROJECT_EXPLANATION_PROMPT_VERSION })
+}
+
+export function buildAnalysisCacheKey(project: Pick<ProjectKnowledgeBase, 'id' | 'name'>, agentId: string, modelId: string, variant?: string) {
+  return createHash('sha256').update(buildAnalysisCacheBasis(project, agentId, modelId, variant)).digest('hex')
+}
+
+export function sanitizeResearchMetadata(value: string) {
+  return redact(value.replace(/\r?\n/g, ' ').replace(/(?:[A-Za-z]:[\\/]|\/)[^\s"'<>]+/g, '[path]')).slice(0, 500)
+}
+
+export function buildProjectRequestFile(rawKnowledge: ProjectKnowledgeBase, webResearchEnabled = true) {
+  return JSON.stringify({
+    schemaMarker: PROJECT_LENS_REQUEST_SCHEMA_MARKER,
+    promptVersion: PROJECT_EXPLANATION_PROMPT_VERSION,
+    explanationSchema: 'PresentationKnowledgeBase',
+    systemPrompt: PROJECT_EXPLANATION_SYSTEM_PROMPT,
+    writingRules: [
+      'Return JSON only.',
+      'Do not invent files, features, technologies, or claims.',
+      'Use the supplied evidence and limitations only.',
+      'Keep uncertain claims clearly marked.',
+    ],
+    evidenceIds: rawKnowledge.importantFiles?.map((file) => file.id) ?? [],
+    projectLimitations: rawKnowledge.limitations ?? [],
+    webResearchPreference: webResearchEnabled ? 'enabled' : 'disabled',
+    deterministicProjectEvidence: rawKnowledge,
+  }, null, 2)
 }
 
 export function resolveOpenCodeExecutable(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -97,7 +137,7 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
 }
 
 export function buildAnalysisArgs(modelId: string, workspaceDirectory: string, requestFile: string, variant?: string) {
-  const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspaceDirectory, '--file', requestFile, 'Read the attached Project Lens request and return only the required JSON.']
+  const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspaceDirectory, '--file', requestFile, OPEN_CODE_RUN_PROMPT]
   if (variant) args.push('--variant', variant)
   return args
 }

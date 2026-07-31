@@ -1,23 +1,22 @@
 import { createServer } from 'node:http'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { runProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
-import { createPresentationFallback, createProjectExplanationRequest, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
+import { createPresentationFallback, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, ProviderAuthSessionDto, ProviderAuthState } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
-import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
+import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode, sanitizeResearchMetadata } from './opencode'
 
 const runs = new Map<string, { events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }>()
 const authSessions = new Map<string, ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean }>()
 const completedCache = new Map<string, PresentationKnowledgeBase>()
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
-const DETERMINISTIC_ANALYSIS_VERSION = '1'
 
 function send(res: import('node:http').ServerResponse, status: number, body: unknown) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 function event(runId: string, next: AnalysisEventDto) { runs.get(runId)?.events.push({ ...next, timestamp: new Date().toISOString() }) }
@@ -53,15 +52,6 @@ async function sampleProject() {
   const files = ['src/main.tsx', 'src/App.tsx', 'src/components/AppHeader.tsx', 'src/pages/LoginPage.tsx', 'src/components/LoginForm.tsx', 'src/services/authService.ts', 'src/pages/DashboardPage.tsx', 'src/components/MetricCard.tsx', 'src/utils/formatDate.ts']
   return { id: 'prepared-vite-sample', name: 'Prepared Vite sample', framework: 'react-vite' as const, files: await Promise.all(files.map(async (file) => ({ path: file, content: await readFile(path.join(sampleRoot, file), 'utf8') }))) }
 }
-function cacheKey(project: Awaited<ReturnType<typeof sampleProject>>, modelId: string, variant?: string) {
-  return createHash('sha256').update(JSON.stringify({ files: project.files, modelId, variant, DETERMINISTIC_ANALYSIS_VERSION, prompt: 'project-explanation-v1' })).digest('hex')
-}
-function evidencePrompt(raw: ReturnType<typeof createProjectKnowledgeBase>) {
-  const request = createProjectExplanationRequest(raw)
-  const compact = { project: { name: raw.name, category: raw.category, frameworks: raw.detectedFrameworks }, parts: raw.projectParts?.map((part) => ({ id: part.id, name: part.name, files: part.relevantFiles?.map((file) => file.path), evidence: part.technicalEvidence })), files: raw.importantFiles?.slice(0, 12).map((file) => ({ path: file.path, preview: file.optionalPreview?.slice(0, 500) })), limitations: request.unsupportedContent }
-  return `${request.systemPrompt}\nPrompt version: ${request.promptVersion}\nReturn a JSON object matching PresentationKnowledgeBase. Evidence:\n${JSON.stringify(compact)}`
-}
-
 export async function analyseLocalProject(input: { name?: string; files?: { path: string; content: string }[] }) {
   if (!input.name || !Array.isArray(input.files) || input.files.length > 300) throw new Error('Invalid local project import.')
   const prepared = prepareLocalFiles(input.files.map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength })))
@@ -77,7 +67,7 @@ export async function analyseLocalProject(input: { name?: string; files?: { path
 
 async function runAnalysis(runId: string, modelId: string, variant?: string, webResearchEnabled = true) {
   const active = runs.get(runId)!; const project = active.project ?? await sampleProject(); event(runId, { type: 'preparing-evidence', message: 'Preparing a safe evidence package.' })
-  const key = cacheKey(project, modelId, variant)
+  const key = buildAnalysisCacheKey(project, 'opencode', modelId, variant)
   const cached = completedCache.get(key)
   if (cached) { event(runId, { type: 'completed', result: cached }); return }
   const analysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, status) => { if (status === 'running') event(runId, { type: 'analysing', message: `Running deterministic ${stage} analysis.` }) }, 0)
@@ -90,13 +80,39 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
   if (selectedModel.availability === 'requires-provider' || selectedModel.runnable === false) throw new OpenCodeFailureError('provider-authentication-required', 'Connect OpenCode to use this model.')
   if (!canStartOpenCodeAnalysis(selectedModel)) throw new OpenCodeFailureError('permission-or-configuration-failure', 'Provider readiness could not be confirmed. Analysis was not started.')
   const workspace = active.source ? await createProjectAnalysisWorkspace(project.files) : await createAnalysisWorkspace(sampleRoot)
-  event(runId, { type: 'starting-agent', message: 'Starting OpenCode in the disposable workspace.' }); event(runId, { type: 'analysing', message: 'OpenCode is running. Waiting for the selected model to respond…' })
-  const requestFile = path.join(workspace.directory, '.project-lens-request.json')
-  await writeFile(requestFile, evidencePrompt(raw), 'utf8')
-  let integrityBaseline = await fileManifest(workspace.directory)
-  const args = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...buildAnalysisArgs(modelId, workspace.directory, requestFile, variant)]
+  const requestDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-request-'))
   try {
-    const options = { cwd: workspace.directory, env: analysisEnvironment(process.env, webResearchEnabled), signal: active.controller.signal, onStdoutEvent: () => event(runId, { type: 'analysing', message: 'OpenCode is receiving a response from the selected model.' }) }
+    event(runId, { type: 'starting-agent', message: 'Starting OpenCode in the disposable workspace.' }); event(runId, { type: 'analysing', message: 'OpenCode is running. Waiting for the selected model to respond…' })
+    const requestFile = path.join(requestDirectory, '.project-lens-request.json')
+    await writeFile(requestFile, buildProjectRequestFile(raw, webResearchEnabled), 'utf8')
+    let integrityBaseline = await fileManifest(workspace.directory)
+    const args = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...buildAnalysisArgs(modelId, workspace.directory, requestFile, variant)]
+    let webResearchOutcome: 'not-requested' | 'configured' | 'used-successfully' | 'attempted-but-unavailable' | 'failed' = webResearchEnabled ? 'configured' : 'not-requested'
+    const options = { cwd: workspace.directory, env: analysisEnvironment(process.env, webResearchEnabled), signal: active.controller.signal, onStdoutEvent: (parsed: Record<string, unknown>) => {
+      if (parsed.type === 'web-research') {
+        const outcome = parsed.outcome
+        if (outcome === 'used-successfully' || outcome === 'attempted-but-unavailable' || outcome === 'failed') webResearchOutcome = outcome
+        const source = parsed.source && typeof parsed.source === 'object' ? parsed.source as { title?: unknown; url?: unknown } : undefined
+        event(runId, {
+          type: 'analysing',
+          message: typeof parsed.message === 'string'
+            ? sanitizeResearchMetadata(parsed.message)
+            : outcome === 'used-successfully'
+              ? 'Web research was used successfully.'
+              : outcome === 'attempted-but-unavailable'
+                ? 'Web research was attempted but unavailable.'
+                : 'Web research failed, so Project Lens continued with project evidence only.',
+          diagnostic: {
+            webResearchOutcome: webResearchOutcome,
+            webResearchSource: source && typeof source.title === 'string' && typeof source.url === 'string'
+              ? { title: sanitizeResearchMetadata(source.title), url: sanitizeResearchMetadata(source.url) }
+              : undefined,
+          },
+        })
+        return
+      }
+      event(runId, { type: 'analysing', message: 'OpenCode is receiving a response from the selected model.' })
+    } }
     const result = await runOpenCode(executable, args, '', options)
     const mutation = changedFiles(integrityBaseline, await fileManifest(workspace.directory))
     if (mutation.length) throw new Error(`OpenCode changed the disposable sample (${mutation.join(', ')}). Result rejected.`)
@@ -107,7 +123,7 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
     let issues = validatePresentationKnowledgeBase(presentation, raw)
     if (issues.length) {
       const repairFile = path.join(workspace.directory, '.project-lens-repair-request.json')
-      await writeFile(repairFile, `${evidencePrompt(raw)}\nRepair these validation errors only: ${issues.join('; ')}\nPrevious output: ${JSON.stringify(presentation)}`, 'utf8')
+      await writeFile(repairFile, `${buildProjectRequestFile(raw, webResearchEnabled)}\nRepair these validation errors only: ${issues.join('; ')}\nPrevious output: ${JSON.stringify(presentation)}`, 'utf8')
       integrityBaseline = await fileManifest(workspace.directory)
       const repairArgs = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...buildAnalysisArgs(modelId, workspace.directory, repairFile, variant)]
       const repair = await runOpenCode(executable, repairArgs, '', options)
@@ -118,8 +134,8 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
     if (issues.length) throw new Error(`OpenCode output could not be validated: ${issues.join('; ')}`)
     const validPresentation = presentation as PresentationKnowledgeBase
     completedCache.set(key, validPresentation)
-    event(runId, { type: 'completed', result: validPresentation })
-  } finally { await removeAnalysisWorkspace(workspace.directory, active.source ? (workspace as { source?: string }).source : undefined) }
+    event(runId, { type: 'completed', result: validPresentation, diagnostic: { webResearchOutcome } })
+  } finally { await removeAnalysisWorkspace(workspace.directory, active.source ? (workspace as { source?: string }).source : undefined); await rm(requestDirectory, { recursive: true, force: true, maxRetries: 3 }) }
 }
 
 export const daemon = createServer(async (req, res) => {
