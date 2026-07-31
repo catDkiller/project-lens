@@ -5,7 +5,6 @@ import { App } from '../src/app/App'
 import { KnowledgeWorkspace } from '../src/app/KnowledgeWorkspace'
 import { Launcher } from '../src/app/Launcher'
 import { ThemeMenu } from '../src/app/ThemeMenu'
-import { preparedSampleAgents } from '../src/fixtures/launcherDemo'
 import { preparedSampleFeatureDefinitions } from '../src/fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleLearningPacks } from '../src/fixtures/preparedSampleLearningPacks'
 import { preparedSamplePresentationKnowledge } from '../src/fixtures/preparedSamplePresentationKnowledge'
@@ -23,12 +22,12 @@ async function rawKnowledge() {
 describe('presentation knowledge workspace', () => {
   it('keeps the launcher and workspace mutually exclusive', () => {
     const markup = renderToStaticMarkup(<App />)
-    expect(markup).toContain('Try a sample project')
+    expect(markup).toContain('Use prepared sample')
     expect(markup).not.toContain('Open another project')
   })
 
   it('shows the current deterministic analysis stage while the sample is running', () => {
-    const markup = renderToStaticMarkup(<Launcher agents={preparedSampleAgents} isAnalysing analysisStage="features" appearance="dark" accent="blue" onAppearance={vi.fn()} onAccent={vi.fn()} onTrySample={vi.fn()} />)
+    const markup = renderToStaticMarkup(<Launcher models={[]} isAnalysing analysisStage="features" appearance="dark" accent="blue" onAppearance={vi.fn()} onAccent={vi.fn()} onTrySample={vi.fn()} onUsePrepared={vi.fn()} onCancel={vi.fn()} />)
     expect(markup).toContain('Checking features…')
   })
 

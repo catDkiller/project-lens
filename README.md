@@ -10,7 +10,9 @@ The product makes agent-created project structure legible: it starts from a proj
 
 ## Current MVP
 
-- Open one prepared React/Vite sample project from the Project Lens launcher.
+- OpenCode detection and real configured-model discovery through a loopback-only local runtime.
+- Analyse the prepared React/Vite sample with a selected OpenCode model, then validate its structured result before opening the existing workspace.
+- Use the committed prepared presentation as a clearly separate no-AI fallback.
 - Run deterministic inventory, static-import, relationship, and project-part analysis.
 - Transform the result into one reusable project knowledge base used by Overview, Complete Guide, Project parts, Technologies, Files, and Decisions views.
 - Switch between accessible light/dark themes and accent tokens.
@@ -20,10 +22,9 @@ The prepared sample is the guaranteed demo. Sources normalize into the same proj
 
 ## Postponed features
 
-- Local-folder access and installed CLI detection. The launcher configuration is clearly marked as sample-only.
+- Local-folder access and GitHub URL fetching.
 - GitHub URL fetching.
-- OpenCode and other CLI adapters.
-- Runtime AI/Codex API calls, authentication, persistence, database, routing, and automatic refactoring.
+- Other CLI adapters, Codex API calls, authentication, persistence, database, routing, and automatic refactoring.
 - Frameworks beyond React/Vite.
 
 ## Local development
@@ -37,6 +38,6 @@ npm run build
 
 ## Architecture
 
-The stable deterministic analyser lives in `src/analysis/`. `src/knowledge/adapter.ts` transforms its `ProjectAnalysis` result and reviewed learning packs into the optional `ProjectKnowledgeBase` contract used by all UI views. The approved Open Design reference remains read-only in `open-design-ui-prototype/`.
+The stable deterministic analyser lives in `src/analysis/`. `src/local-api/` is a small Node runtime bound to `127.0.0.1`; it discovers OpenCode with the documented CLI, runs only the materialized `prepared-sample-project/`, validates output, and caches valid results by sample fingerprint and selected model. The approved Open Design reference remains read-only in `open-design-ui-prototype/`.
 
 See [CODEX_HANDOFF.md](CODEX_HANDOFF.md) for the component map, current limits, and deployment notes.

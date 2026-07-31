@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { runProjectAnalysis } from '../analysis'
 import type { AnalysisStageId, ProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
-import { preparedSampleAgents } from '../fixtures/launcherDemo'
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
 import { createProjectKnowledgeBase, createPresentationFallback, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import { preparedSamplePresentationKnowledge } from '../fixtures/preparedSamplePresentationKnowledge'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
+import type { AgentStatusDto, AnalysisEventDto, ModelDto } from '../local-api/contracts'
 import { Launcher } from './Launcher'
 import { KnowledgeWorkspace } from './KnowledgeWorkspace'
 import type { Accent, Appearance } from './ThemeMenu'
@@ -20,37 +20,62 @@ export function App() {
   const [knowledge, setKnowledge] = useState<PresentationKnowledgeBase | null>(null)
   const [error, setError] = useState<string>()
   const [analysisStage, setAnalysisStage] = useState<AnalysisStageId>()
+  const [agent, setAgent] = useState<AgentStatusDto>()
+  const [models, setModels] = useState<ModelDto[]>([])
+  const [runtimeStatus, setRuntimeStatus] = useState('Checking local runtime…')
+  const [runId, setRunId] = useState<string>()
+  const [lastModel, setLastModel] = useState<string>()
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', appearance === 'dark')
     document.documentElement.dataset.accent = accent
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('project-lens-appearance', appearance)
-      localStorage.setItem('project-lens-accent', accent)
-    }
+    localStorage.setItem('project-lens-appearance', appearance); localStorage.setItem('project-lens-accent', accent)
   }, [appearance, accent])
 
-  async function analyseSample() {
-    setMode('analysing')
-    setError(undefined)
-    setAnalysisStage(undefined)
+  useEffect(() => { void loadRuntime() }, [])
+  async function loadRuntime() {
     try {
-      const project = await bundledSampleProjectSource.load()
-      const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, status) => {
-        if (status === 'running') setAnalysisStage(stage)
-      }, 120)
-      const rawKnowledge = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample')
-      setKnowledge(validatePresentationKnowledgeBase(preparedSamplePresentationKnowledge, rawKnowledge).length ? createPresentationFallback(rawKnowledge) : preparedSamplePresentationKnowledge)
-      setMode('workspace')
-    } catch {
-      setError('The prepared sample could not be analysed. Try again.')
-      setMode('launcher')
-    }
+      const agents = await fetch('/api/agents').then(async (response) => response.ok ? response.json() as Promise<AgentStatusDto[]> : Promise.reject())
+      const detected = agents[0]; setAgent(detected)
+      if (!detected?.installed) { setRuntimeStatus(detected?.error ?? 'OpenCode is unavailable. Install and configure OpenCode, then restart Project Lens.'); return }
+      setRuntimeStatus('Loading OpenCode models…')
+      const discovered = await fetch('/api/agents/opencode/models').then(async (response) => response.ok ? response.json() as Promise<ModelDto[]> : Promise.reject(await response.json()))
+      setModels(discovered); setRuntimeStatus(discovered.length ? 'OpenCode detected' : 'No configured models. Configure a provider in OpenCode, then restart Project Lens.')
+    } catch { setRuntimeStatus('Project Lens could not reach its local runtime. Run npm run dev and try again.') }
   }
 
+  async function openPreparedSample() {
+    setMode('analysing'); setError(undefined); setAnalysisStage(undefined)
+    try {
+      const project = await bundledSampleProjectSource.load()
+      const analysis: ProjectAnalysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, status) => { if (status === 'running') setAnalysisStage(stage) }, 120)
+      const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample')
+      setKnowledge(validatePresentationKnowledgeBase(preparedSamplePresentationKnowledge, raw).length ? createPresentationFallback(raw) : preparedSamplePresentationKnowledge)
+      setMode('workspace')
+    } catch { setError('The prepared sample could not be analysed. Try again.'); setMode('launcher') }
+  }
+
+  async function analyseWithOpenCode(modelId: string) {
+    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setLastModel(modelId)
+    try {
+      const started = await fetch('/api/analysis/sample', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: 'opencode', modelId }) }).then(async (response) => response.ok ? response.json() as Promise<{ runId: string }> : Promise.reject(await response.json()))
+      setRunId(started.runId)
+      const stream = new EventSource(`/api/analysis/${started.runId}/events`)
+      for (const type of ['queued', 'preparing-evidence', 'starting-agent', 'analysing', 'validating', 'completed', 'failed', 'cancelled']) {
+        stream.addEventListener(type, (message) => {
+          const event = JSON.parse((message as MessageEvent).data) as AnalysisEventDto
+          if (event.type === 'completed' && event.result) { stream.close(); setKnowledge(event.result); setRunId(undefined); setMode('workspace') }
+          if (event.type === 'failed' || event.type === 'cancelled') { stream.close(); setRunId(undefined); setError(event.error ?? (event.type === 'cancelled' ? 'Analysis was cancelled.' : 'Analysis failed.')); setMode('launcher') }
+        })
+      }
+      stream.onerror = () => { stream.close(); setRunId(undefined); setError('The analysis connection ended unexpectedly. Try again.'); setMode('launcher') }
+    } catch (reason) { setRunId(undefined); setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'Analysis could not start.'); setMode('launcher') }
+  }
+
+  async function cancelAnalysis() { if (runId) await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
   function returnToLauncher() { setKnowledge(null); setMode('launcher') }
-  if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={analyseSample} />
-  return <Launcher agents={preparedSampleAgents} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseSample} />
+  if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
+  return <Launcher agent={agent} models={models} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onCancel={cancelAnalysis} />
 }
