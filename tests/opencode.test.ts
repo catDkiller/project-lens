@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -25,6 +25,19 @@ describe('OpenCode local adapter', () => {
 
   it('lists only IDs explicitly marked free', () => {
     expect(freeModelIds(mapOpenCodeModels('provider/free:free\nprovider/unknown\n'))).toEqual(['provider/free:free'])
+  })
+
+  it('separates catalogue entries from provider-confirmed runnable models', () => {
+    const models = applyProviderAvailability(mapOpenCodeModels('google/gemini\nopencode/deepseek'), [
+      { id: 'google', displayName: 'Google', connected: true },
+      { id: 'opencode', displayName: 'opencode', connected: false },
+    ])
+    expect(models[0]).toMatchObject({ availability: 'ready', runnable: true })
+    expect(models[1]).toMatchObject({ availability: 'requires-provider', runnable: false })
+  })
+
+  it('parses ANSI OpenCode auth output without exposing credentials', () => {
+    expect(mapOpenCodeProviders('\u001b[34m•\u001b[39m Google \u001b[90mapi\u001b[39m', [])).toMatchObject([{ id: 'google', connected: true }])
   })
 
   it('leaves an unavailable PATH unresolved', () => {

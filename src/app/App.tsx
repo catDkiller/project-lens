@@ -29,6 +29,7 @@ export function App() {
   const [runId, setRunId] = useState<string>()
   const [lastModel, setLastModel] = useState<string>()
   const [projectNotice, setProjectNotice] = useState<string>()
+  const [localProject, setLocalProject] = useState<{ name: string; id: string; files: ProjectFile[]; summary: string }>()
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
 
@@ -53,6 +54,7 @@ export function App() {
   }
 
   async function openPreparedSample() {
+    setLocalProject(undefined); setProjectNotice(undefined)
     setMode('analysing'); setError(undefined); setAnalysisStage(undefined)
     try {
       const project = await bundledSampleProjectSource.load()
@@ -66,12 +68,16 @@ export function App() {
   async function analyseWithOpenCode(modelId: string) {
     setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setLastModel(modelId)
     try {
-      const started = await fetch('/api/analysis/sample', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: 'opencode', modelId }) }).then(async (response) => response.ok ? response.json() as Promise<{ runId: string }> : Promise.reject(await response.json()))
+      const endpoint = localProject ? '/api/analysis/local' : '/api/analysis/sample'
+      const body = localProject ? { projectId: localProject.id, name: localProject.name, files: localProject.files, modelId } : { agentId: 'opencode', modelId }
+      const started = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (response) => response.ok ? response.json() as Promise<{ runId: string }> : Promise.reject(await response.json()))
       setRunId(started.runId)
       const stream = new EventSource(`/api/analysis/${started.runId}/events`)
       for (const type of ['queued', 'preparing-evidence', 'starting-agent', 'analysing', 'validating', 'completed', 'failed', 'cancelled']) {
         stream.addEventListener(type, (message) => {
           const event = JSON.parse((message as MessageEvent).data) as AnalysisEventDto
+          const stageByEvent: Record<string, AnalysisStageId> = { 'preparing-evidence': 'inventory', 'starting-agent': 'relationships', analysing: 'features', validating: 'features' }
+          if (stageByEvent[event.type]) setAnalysisStage(stageByEvent[event.type])
           if (event.type === 'completed' && event.result) { stream.close(); setKnowledge(event.result); setRunId(undefined); setMode('workspace') }
           if (event.type === 'failed' || event.type === 'cancelled') { stream.close(); setRunId(undefined); setError(event.error ?? (event.type === 'cancelled' ? 'Analysis was cancelled.' : 'Analysis failed.')); setMode('launcher') }
         })
@@ -81,22 +87,17 @@ export function App() {
   }
 
   async function importLocalProject(name: string, files: ProjectFile[]) {
-    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setProjectNotice(undefined)
-    try {
-      const project = await localFolderProjectSource(name, files).load()
-      const result = await fetch('/api/projects/local', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: project.name, files: project.files }) }).then(async (response) => response.ok ? response.json() as Promise<{ knowledge: PresentationKnowledgeBase; included: number; skipped: number; size: number }> : Promise.reject(await response.json()))
-      setKnowledge(result.knowledge)
-      setProjectNotice(`${project.name}: ${result.included} files included, ${result.skipped} skipped, ${(result.size / 1024).toFixed(1)} KB prepared locally.`)
-      setMode('workspace')
-    } catch (reason) { setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'The local project could not be analysed.'); setMode('launcher') }
+    const project = await localFolderProjectSource(name, files).load()
+    setLocalProject({ name: project.name, id: project.id, files: project.files, summary: `${project.files.length} files included.` })
+    setError(undefined); setAnalysisStage(undefined); setProjectNotice(`${project.files.length} files included.`); setMode('launcher')
   }
 
   async function cancelAnalysis() { if (runId) await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
-  async function refreshProviders() { const response = await fetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()) }
+  async function refreshProviders() { const response = await fetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()); await refreshModels() }
   async function refreshModels() { const response = await fetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
-  async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json(); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
+  async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json(); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.'); if (response.ok) { for (let attempt = 0; attempt < 6; attempt += 1) { await new Promise((resolve) => setTimeout(resolve, 1500)); await refreshProviders() } } }
   async function disconnectProvider(providerId: string) { await fetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
-  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
+  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
 }
