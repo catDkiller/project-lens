@@ -239,6 +239,114 @@ h1 {
   width: 1rem;
 }
 
+.folder-input {
+  display: none;
+}
+
+.model-popover {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1.25rem 3rem rgb(10 20 30 / 24%);
+  box-sizing: border-box;
+  color: var(--fg);
+  max-height: min(26rem, calc(100dvh - 1rem));
+  overflow: hidden;
+  position: fixed;
+  z-index: 20;
+}
+
+.model-popover-controls {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+}
+
+.model-popover-controls > label,
+.model-provider-group > p {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.model-popover input[type='search'] {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  width: 100%;
+}
+
+.model-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.model-filters label {
+  align-items: center;
+  color: var(--fg-secondary);
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 0.35rem;
+}
+
+.model-results {
+  max-height: min(18rem, calc(100dvh - 10rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.model-results::-webkit-scrollbar { width: 0.45rem; }
+.model-results::-webkit-scrollbar-thumb { background: var(--border-strong); border: 2px solid var(--surface); border-radius: 1rem; }
+
+.model-provider-group {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.7rem 0.45rem 0.3rem;
+}
+
+.model-provider-group > p { padding: 0 0.35rem 0.25rem; }
+
+.model-option {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  width: 100%;
+}
+
+.model-option.highlighted { background: var(--accent-light); }
+.model-option.selected { box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+.model-option strong,
+.model-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-option span { color: var(--muted); font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.7rem; }
+.model-empty { color: var(--muted); margin: 0; padding: 1rem; }
+
+.project-notice {
+  background: var(--accent-light);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  margin: 0 0 1.25rem;
+  padding: 0.65rem 0.8rem;
+}
+
 .folder-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -315,12 +423,6 @@ h1 {
 .model-trigger span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .launcher-picker-menu { max-height: min(28rem, calc(100dvh - 5rem)); overflow: hidden; }
 .launcher-picker-menu input[type='search'] { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); min-height: 2.5rem; padding: .4rem .55rem; }
-#model-listbox { max-height: 18rem; overflow: auto; }
-.model-option { background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; display: grid; gap: .15rem; min-height: 2.75rem; padding: .5rem; text-align: left; width: 100%; }
-.model-option span { color: var(--muted); font-size: .72rem; overflow-wrap: anywhere; }
-.model-option:hover, .model-option.active, .model-option.selected { background: var(--accent-light); }
-.model-option.selected { outline: 1px solid var(--accent-border); }
-.model-empty { color: var(--muted); font-size: .78rem; line-height: 1.4; margin: .5rem 0; }
 .launcher-settings { max-width: 40rem; width: 100%; }
 .launcher-settings-body { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: .6rem; margin-top: .5rem; padding: .75rem; }
 .launcher-settings-body p { color: var(--muted); font-size: .78rem; margin: 0; }

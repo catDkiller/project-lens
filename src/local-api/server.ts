@@ -1,14 +1,16 @@
 import { createServer } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { runProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
 import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
-import { createProjectExplanationRequest, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
+import { createPresentationFallback, createProjectExplanationRequest, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto } from './contracts'
 import { createAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
+import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
 import { analysisEnvironment, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
 
 const runs = new Map<string, { events: AnalysisEventDto[]; controller: AbortController }>()
@@ -29,6 +31,19 @@ function evidencePrompt(raw: ReturnType<typeof createProjectKnowledgeBase>) {
   const request = createProjectExplanationRequest(raw)
   const compact = { project: { name: raw.name, category: raw.category, frameworks: raw.detectedFrameworks }, parts: raw.projectParts?.map((part) => ({ id: part.id, name: part.name, files: part.relevantFiles?.map((file) => file.path), evidence: part.technicalEvidence })), files: raw.importantFiles?.slice(0, 12).map((file) => ({ path: file.path, preview: file.optionalPreview?.slice(0, 500) })), limitations: request.unsupportedContent }
   return `${request.systemPrompt}\nPrompt version: ${request.promptVersion}\nReturn a JSON object matching PresentationKnowledgeBase. Evidence:\n${JSON.stringify(compact)}`
+}
+
+export async function analyseLocalProject(input: { name?: string; files?: { path: string; content: string }[] }) {
+  if (!input.name || !Array.isArray(input.files) || input.files.length > 300) throw new Error('Invalid local project import.')
+  const prepared = prepareLocalFiles(input.files.map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength })))
+  if (!prepared.files.length) throw new Error('No supported project text files were included.')
+  const workspace = await mkdtemp(path.join(tmpdir(), 'project-lens-local-'))
+  try {
+    for (const file of prepared.files) { const target = path.join(workspace, file.path); if (!target.startsWith(workspace + path.sep)) throw new Error('Unsafe local path.'); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, file.content, 'utf8') }
+    const project = localProject(input.name, prepared.files)
+    const analysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, () => {})
+    return { knowledge: createPresentationFallback(createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Local folder')), included: prepared.files.length, skipped: prepared.skipped, size: prepared.size }
+  } finally { await rm(workspace, { recursive: true, force: true, maxRetries: 3 }) }
 }
 
 async function runAnalysis(runId: string, modelId: string, variant?: string) {
@@ -76,6 +91,7 @@ export const daemon = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/agents/opencode/models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { return send(res, 200, await discoverModels(detected.executablePath)) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }
   if (req.method === 'GET' && url.pathname === '/api/agents/opencode/free-models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { return send(res, 200, freeModelIds(await discoverModels(detected.executablePath))) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }
   if (req.method === 'GET' && (url.pathname === '/api/opencode/models' || url.pathname === '/api/opencode/providers')) { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { return send(res, 200, url.pathname.endsWith('/models') ? await discoverModels(detected.executablePath) : await discoverProviders(detected.executablePath)) } catch (error) { return send(res, 502, { error: error instanceof Error ? redact(error instanceof Error ? error.message : String(error)) : 'OpenCode discovery failed.' }) } }
+  if (req.method === 'POST' && url.pathname === '/api/projects/local') { let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 2_000_000) return send(res, 413, { error: 'Import is too large.' }) } try { return send(res, 200, await analyseLocalProject(JSON.parse(body))) } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Local project import failed.' }) } }
   if (req.method === 'POST' && (url.pathname === '/api/opencode/providers/connect' || url.pathname === '/api/opencode/providers/disconnect')) {
     let body = ''; for await (const chunk of req) body += chunk; let parsed: { providerId?: string }; try { parsed = JSON.parse(body) } catch { return send(res, 400, { error: 'Invalid request body.' }) }
     const executable = resolveOpenCodeExecutable(); if (!executable || !parsed.providerId || !/^[a-z0-9][a-z0-9._-]{0,80}$/i.test(parsed.providerId)) return send(res, 400, { error: 'Invalid provider.' })

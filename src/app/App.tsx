@@ -7,6 +7,8 @@ import { createProjectKnowledgeBase, createPresentationFallback, validatePresent
 import type { PresentationKnowledgeBase } from '../knowledge'
 import { preparedSamplePresentationKnowledge } from '../fixtures/preparedSamplePresentationKnowledge'
 import { bundledSampleProjectSource } from '../project-sources/BundledSampleProjectSource'
+import { localFolderProjectSource } from '../project-sources/LocalFolderProjectSource'
+import type { ProjectFile } from '../project-sources/types'
 import type { AgentStatusDto, AnalysisEventDto, ModelDto, ProviderDto } from '../local-api/contracts'
 import { Launcher } from './Launcher'
 import { KnowledgeWorkspace } from './KnowledgeWorkspace'
@@ -26,6 +28,7 @@ export function App() {
   const [runtimeStatus, setRuntimeStatus] = useState('Checking local runtime…')
   const [runId, setRunId] = useState<string>()
   const [lastModel, setLastModel] = useState<string>()
+  const [projectNotice, setProjectNotice] = useState<string>()
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
 
@@ -77,12 +80,23 @@ export function App() {
     } catch (reason) { setRunId(undefined); setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'Analysis could not start.'); setMode('launcher') }
   }
 
+  async function importLocalProject(name: string, files: ProjectFile[]) {
+    setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setProjectNotice(undefined)
+    try {
+      const project = await localFolderProjectSource(name, files).load()
+      const result = await fetch('/api/projects/local', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: project.name, files: project.files }) }).then(async (response) => response.ok ? response.json() as Promise<{ knowledge: PresentationKnowledgeBase; included: number; skipped: number; size: number }> : Promise.reject(await response.json()))
+      setKnowledge(result.knowledge)
+      setProjectNotice(`${project.name}: ${result.included} files included, ${result.skipped} skipped, ${(result.size / 1024).toFixed(1)} KB prepared locally.`)
+      setMode('workspace')
+    } catch (reason) { setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'The local project could not be analysed.'); setMode('launcher') }
+  }
+
   async function cancelAnalysis() { if (runId) await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
   async function refreshProviders() { const response = await fetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()) }
   async function refreshModels() { const response = await fetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
   async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json(); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
   async function disconnectProvider(providerId: string) { await fetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
-  function returnToLauncher() { setKnowledge(null); setMode('launcher') }
-  if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
-  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
+  function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
+  if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
+  return <Launcher agent={agent} models={models} providers={providers} runtimeStatus={runtimeStatus} isAnalysing={mode === 'analysing'} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} />
 }

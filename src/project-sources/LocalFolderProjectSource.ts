@@ -1,5 +1,7 @@
-import type { ComingSoonProjectSource } from './types'
+import { localProject } from './localFolderImport'
+import type { NormalizedProject, ProjectFile, ProjectSource } from './types'
 
-export const localFolderProjectSource: ComingSoonProjectSource = {
-  id: 'local-folder', kind: 'local-folder', label: 'Local folder', status: 'coming-soon',
+export function localFolderProjectSource(name: string, files: ProjectFile[]): ProjectSource {
+  const project: NormalizedProject = localProject(name, files)
+  return { id: project.id, kind: 'local-folder', label: name, load: async () => project }
 }
