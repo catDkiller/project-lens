@@ -311,6 +311,24 @@ h1 {
   z-index: 5;
 }
 
+.model-trigger { align-items: center; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; display: inline-flex; gap: .45rem; height: 2.5rem; max-width: 15rem; min-width: 10rem; overflow: hidden; padding: 0 .7rem; text-align: left; }
+.model-trigger span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-picker-menu { max-height: min(28rem, calc(100dvh - 5rem)); overflow: hidden; }
+.launcher-picker-menu input[type='search'] { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); min-height: 2.5rem; padding: .4rem .55rem; }
+#model-listbox { max-height: 18rem; overflow: auto; }
+.model-option { background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; display: grid; gap: .15rem; min-height: 2.75rem; padding: .5rem; text-align: left; width: 100%; }
+.model-option span { color: var(--muted); font-size: .72rem; overflow-wrap: anywhere; }
+.model-option:hover, .model-option.active, .model-option.selected { background: var(--accent-light); }
+.model-option.selected { outline: 1px solid var(--accent-border); }
+.model-empty { color: var(--muted); font-size: .78rem; line-height: 1.4; margin: .5rem 0; }
+.launcher-settings { max-width: 40rem; width: 100%; }
+.launcher-settings-body { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: .6rem; margin-top: .5rem; padding: .75rem; }
+.launcher-settings-body p { color: var(--muted); font-size: .78rem; margin: 0; }
+.provider-row, .provider-actions { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; justify-content: space-between; }
+.provider-row { border-top: 1px solid var(--border); padding-top: .55rem; }
+.provider-row button, .provider-actions button { background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg-secondary); min-height: 2.25rem; padding: .35rem .6rem; }
+.launcher-filter { align-items: center; color: var(--fg-secondary) !important; display: flex; font-size: .75rem !important; font-weight: 500 !important; letter-spacing: normal !important; text-transform: none !important; }
+
 .launcher-picker-field {
   display: grid;
   gap: 0.25rem;
@@ -813,6 +831,8 @@ summary {
     left: 0;
     width: min(15rem, calc(100vw - 2rem));
   }
+
+  .model-trigger { max-width: calc(100vw - 9rem); min-width: 0; }
 
   .launcher-footer {
     align-items: flex-start;
