@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { extractOpenCodeText, mapOpenCodeModels, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -8,6 +8,16 @@ describe('OpenCode local adapter', () => {
       { providerId: 'provider-a', modelId: 'fast', fullId: 'provider-a/fast', displayName: 'fast', availability: 'available' },
       { providerId: 'provider-b', modelId: 'careful', fullId: 'provider-b/careful', displayName: 'careful', availability: 'available' },
     ])
+  })
+
+  it('uses an isolated deny-by-default permission configuration', () => {
+    expect(isSafeAnalysisConfig()).toBe(true)
+    expect(analysisPermissionConfig.permission).toMatchObject({ '*': 'deny', read: 'allow', list: 'allow', glob: 'allow', grep: 'allow', edit: 'deny', bash: 'deny', webfetch: 'deny', task: 'deny', external_directory: 'deny' })
+    expect(JSON.parse(analysisEnvironment({}).OPENCODE_CONFIG_CONTENT!)).toEqual(analysisPermissionConfig)
+  })
+
+  it('lists only IDs explicitly marked free', () => {
+    expect(freeModelIds(mapOpenCodeModels('provider/free:free\nprovider/unknown\n'))).toEqual(['provider/free:free'])
   })
 
   it('leaves an unavailable PATH unresolved', () => {

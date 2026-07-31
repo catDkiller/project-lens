@@ -8,7 +8,8 @@ import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningP
 import { createProjectExplanationRequest, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto } from './contracts'
-import { detectOpenCode, discoverModels, extractOpenCodeText, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
+import { createAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
+import { analysisEnvironment, detectOpenCode, discoverModels, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
 
 const runs = new Map<string, { events: AnalysisEventDto[]; controller: AbortController }>()
 const completedCache = new Map<string, PresentationKnowledgeBase>()
@@ -38,24 +39,32 @@ async function runAnalysis(runId: string, modelId: string, variant?: string) {
   const analysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, () => {})
   const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, 'Sample')
   const executable = resolveOpenCodeExecutable(); if (!executable) throw new Error('OpenCode is unavailable.')
+  if (!isSafeAnalysisConfig()) throw new Error('OpenCode runtime safety could not be confirmed. Analysis was not started.')
+  const workspace = await createAnalysisWorkspace(sampleRoot)
   event(runId, { type: 'starting-agent' }); event(runId, { type: 'analysing' })
-  const args = ['run', '--format', 'json', '--model', modelId, '--dir', sampleRoot]
+  const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspace.directory]
   if (variant) args.push('--variant', variant)
-  const result = await runOpenCode(executable, args, evidencePrompt(raw), active.controller.signal)
-  if (result.code !== 0) throw new Error(redact(result.stderr) || 'OpenCode analysis failed.')
-  event(runId, { type: 'validating' })
-  let presentation: unknown
-  try { presentation = JSON.parse(extractOpenCodeText(result.stdout)) } catch { throw new Error('OpenCode did not return structured JSON.') }
-  let issues = validatePresentationKnowledgeBase(presentation, raw)
-  if (issues.length) {
-    const repair = await runOpenCode(executable, args, `${evidencePrompt(raw)}\nRepair these validation errors only: ${issues.join('; ')}\nPrevious output: ${JSON.stringify(presentation)}`, active.controller.signal)
-    try { presentation = JSON.parse(extractOpenCodeText(repair.stdout)) } catch { throw new Error('OpenCode repair did not return structured JSON.') }
-    issues = validatePresentationKnowledgeBase(presentation, raw)
-  }
-  if (issues.length) throw new Error(`OpenCode output could not be validated: ${issues.join('; ')}`)
-  const validPresentation = presentation as PresentationKnowledgeBase
-  completedCache.set(key, validPresentation)
-  event(runId, { type: 'completed', result: validPresentation })
+  try {
+    const options = { cwd: workspace.directory, env: analysisEnvironment(), signal: active.controller.signal }
+    const result = await runOpenCode(executable, args, evidencePrompt(raw), options)
+    const mutation = changedFiles(workspace.before, await fileManifest(workspace.directory))
+    if (mutation.length) throw new Error(`OpenCode changed the disposable sample (${mutation.join(', ')}). Result rejected.`)
+    if (result.code !== 0) throw new Error(redact(result.stderr) || 'OpenCode analysis failed.')
+    event(runId, { type: 'validating' })
+    let presentation: unknown
+    try { presentation = JSON.parse(extractOpenCodeText(result.stdout)) } catch { throw new Error('OpenCode did not return structured JSON.') }
+    let issues = validatePresentationKnowledgeBase(presentation, raw)
+    if (issues.length) {
+      const repair = await runOpenCode(executable, args, `${evidencePrompt(raw)}\nRepair these validation errors only: ${issues.join('; ')}\nPrevious output: ${JSON.stringify(presentation)}`, options)
+      if (changedFiles(workspace.before, await fileManifest(workspace.directory)).length) throw new Error('OpenCode changed the disposable sample. Result rejected.')
+      try { presentation = JSON.parse(extractOpenCodeText(repair.stdout)) } catch { throw new Error('OpenCode repair did not return structured JSON.') }
+      issues = validatePresentationKnowledgeBase(presentation, raw)
+    }
+    if (issues.length) throw new Error(`OpenCode output could not be validated: ${issues.join('; ')}`)
+    const validPresentation = presentation as PresentationKnowledgeBase
+    completedCache.set(key, validPresentation)
+    event(runId, { type: 'completed', result: validPresentation })
+  } finally { await removeAnalysisWorkspace(workspace.directory) }
 }
 
 export const daemon = createServer(async (req, res) => {
@@ -63,6 +72,7 @@ export const daemon = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/runtime/health') return send(res, 200, { status: 'ready', version: '0.1.0' })
   if (req.method === 'GET' && url.pathname === '/api/agents') return send(res, 200, [await detectOpenCode()])
   if (req.method === 'GET' && url.pathname === '/api/agents/opencode/models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { return send(res, 200, await discoverModels(detected.executablePath)) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }
+  if (req.method === 'GET' && url.pathname === '/api/agents/opencode/free-models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { return send(res, 200, freeModelIds(await discoverModels(detected.executablePath))) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }
   if (req.method === 'POST' && url.pathname === '/api/analysis/sample') { let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 5_000) return send(res, 413, { error: 'Request is too large.' }) } let parsed: { agentId?: string; modelId?: string; variant?: string }; try { parsed = JSON.parse(body) } catch { return send(res, 400, { error: 'Invalid request body.' }) } if (parsed.agentId !== 'opencode' || !parsed.modelId || parsed.modelId.includes('..') || parsed.modelId.length > 240 || (parsed.variant !== undefined && (typeof parsed.variant !== 'string' || parsed.variant.length > 80))) return send(res, 400, { error: 'Only an OpenCode model for the prepared sample is allowed.' }); if ([...runs.values()].some((run) => !run.events.some((item) => ['completed', 'failed', 'cancelled'].includes(item.type)))) return send(res, 409, { error: 'One sample analysis is already running.' }); const runId = randomUUID(); runs.set(runId, { events: [{ type: 'queued' }], controller: new AbortController() }); void runAnalysis(runId, parsed.modelId, parsed.variant).catch((error) => event(runId, { type: error instanceof Error && error.message.includes('cancelled') ? 'cancelled' : 'failed', error: error instanceof Error ? error.message : 'Analysis failed.' })); return send(res, 202, { runId }) }
   const match = url.pathname.match(/^\/api\/analysis\/([^/]+)\/(events|cancel)$/)
   if (match) { const run = runs.get(match[1]); if (!run) return send(res, 404, { error: 'Unknown analysis run.' }); if (req.method === 'POST' && match[2] === 'cancel') { run.controller.abort(); event(match[1], { type: 'cancelled' }); return send(res, 202, { status: 'cancelled' }) } if (req.method === 'GET' && match[2] === 'events') { res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); let index = 0; const timer = setInterval(() => { while (index < run.events.length) { const current = run.events[index++]; res.write(`event: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) { clearInterval(timer); res.end() } } }, 100); req.on('close', () => clearInterval(timer)); return } }
