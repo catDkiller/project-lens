@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable } from '../src/local-api/opencode'
 
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
@@ -75,5 +75,23 @@ describe('OpenCode local adapter', () => {
   it('uses the final JSON text event and redacts credential-shaped stderr', () => {
     expect(extractOpenCodeText('{"text":"first"}\n{"part":{"text":"{\\"version\\":\\"1.0\\"}"}}')).toBe('{"version":"1.0"}')
     expect(redact('token=secret-value')).toBe('token=[redacted]')
+  })
+
+  it('uses a short positional prompt and an attached request file', () => {
+    const args = buildAnalysisArgs('google/gemini-2.5-pro', 'C:/temp/workspace', 'C:/temp/workspace/.project-lens-request.json')
+    expect(args).toContain('--file')
+    expect(args).toContain('C:/temp/workspace/.project-lens-request.json')
+    expect(args.at(-1)).toBe('Read the attached Project Lens request and return only the required JSON.')
+    expect(args.join(' ').length).toBeLessThan(1_000)
+  })
+
+  it('uses phase-aware timeout defaults and parses fragmented-safe NDJSON lines', () => {
+    expect(OPEN_CODE_TIMEOUTS).toEqual({ processStartMs: 30_000, firstResponseMs: 240_000, inactivityMs: 120_000, totalRunMs: 600_000 })
+    expect(parseOpenCodeEvents('{"type":"start"}\r\n\r\nnot-json\r\n{"type":"result"}')).toEqual([{ type: 'start' }, { type: 'result' }])
+  })
+
+  it('keeps debug diagnostics opt-in and separate from normal arguments', () => {
+    expect(openCodeDiagnosticArgs(false)).toEqual([])
+    expect(openCodeDiagnosticArgs(true)).toEqual(['--print-logs', '--log-level', 'DEBUG'])
   })
 })

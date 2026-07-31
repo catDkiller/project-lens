@@ -11,7 +11,7 @@ import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, ProviderAuthSessionDto, ProviderAuthState } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
-import { analysisEnvironment, applyProviderAvailability, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
+import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, redact, resolveOpenCodeExecutable, runOpenCode } from './opencode'
 
 const runs = new Map<string, { events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }>()
 const authSessions = new Map<string, ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean }>()
@@ -23,7 +23,10 @@ function send(res: import('node:http').ServerResponse, status: number, body: unk
 function event(runId: string, next: AnalysisEventDto) { runs.get(runId)?.events.push({ ...next, timestamp: new Date().toISOString() }) }
 function analysisFailure(runId: string, modelId: string, error: unknown): AnalysisEventDto {
   const last = runs.get(runId)?.events.at(-1)
-  if (error instanceof OpenCodeTimeoutError) return { type: 'failed', error: 'OpenCode did not respond in time.', message: `Stopped after ${last?.message ?? 'starting OpenCode'}.`, diagnostic: { timeoutType: error.timeoutType, stderr: redact(error.message), modelId, lastActivity: last?.timestamp } }
+  if (error instanceof OpenCodeTimeoutError) {
+    const message = error.timeoutType === 'provider-first-response' ? 'The model did not return its first response within 4 minutes.' : `OpenCode timed out during ${error.timeoutType.replaceAll('-', ' ')}.`
+    return { type: 'failed', error: message, message: `Stopped after ${last?.message ?? 'starting OpenCode'}.`, diagnostic: { timeoutType: error.timeoutType, stderr: redact(error.message), modelId, lastActivity: last?.timestamp } }
+  }
   if (error instanceof Error && error.message.includes('cancelled')) return { type: 'cancelled', error: 'Analysis was cancelled.' }
   const code = classifyOpenCodeFailure(error)
   return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message: error instanceof Error ? redact(error.message) : 'Analysis failed.', diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp } }
@@ -87,13 +90,15 @@ async function runAnalysis(runId: string, modelId: string, variant?: string) {
   if (selectedModel.availability === 'requires-provider' || selectedModel.runnable === false) throw new OpenCodeFailureError('provider-authentication-required', 'Connect OpenCode to use this model.')
   if (!canStartOpenCodeAnalysis(selectedModel)) throw new OpenCodeFailureError('permission-or-configuration-failure', 'Provider readiness could not be confirmed. Analysis was not started.')
   const workspace = active.source ? await createProjectAnalysisWorkspace(project.files) : await createAnalysisWorkspace(sampleRoot)
-  event(runId, { type: 'starting-agent' }); event(runId, { type: 'analysing' })
-  const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspace.directory]
-  if (variant) args.push('--variant', variant)
+  event(runId, { type: 'starting-agent', message: 'Starting OpenCode in the disposable workspace.' }); event(runId, { type: 'analysing', message: 'OpenCode is running. Waiting for the selected model to respond…' })
+  const requestFile = path.join(workspace.directory, '.project-lens-request.json')
+  await writeFile(requestFile, evidencePrompt(raw), 'utf8')
+  let integrityBaseline = await fileManifest(workspace.directory)
+  const args = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...buildAnalysisArgs(modelId, workspace.directory, requestFile, variant)]
   try {
-    const options = { cwd: workspace.directory, env: analysisEnvironment(), signal: active.controller.signal }
-    const result = await runOpenCode(executable, args, evidencePrompt(raw), options)
-    const mutation = changedFiles(workspace.before, await fileManifest(workspace.directory))
+    const options = { cwd: workspace.directory, env: analysisEnvironment(), signal: active.controller.signal, onStdoutEvent: () => event(runId, { type: 'analysing', message: 'OpenCode is receiving a response from the selected model.' }) }
+    const result = await runOpenCode(executable, args, '', options)
+    const mutation = changedFiles(integrityBaseline, await fileManifest(workspace.directory))
     if (mutation.length) throw new Error(`OpenCode changed the disposable sample (${mutation.join(', ')}). Result rejected.`)
     if (result.code !== 0) throw new Error(redact(result.stderr) || 'OpenCode analysis failed.')
     event(runId, { type: 'validating' })
@@ -101,8 +106,12 @@ async function runAnalysis(runId: string, modelId: string, variant?: string) {
     try { presentation = JSON.parse(extractOpenCodeText(result.stdout)) } catch { throw new Error('OpenCode did not return structured JSON.') }
     let issues = validatePresentationKnowledgeBase(presentation, raw)
     if (issues.length) {
-      const repair = await runOpenCode(executable, args, `${evidencePrompt(raw)}\nRepair these validation errors only: ${issues.join('; ')}\nPrevious output: ${JSON.stringify(presentation)}`, options)
-      if (changedFiles(workspace.before, await fileManifest(workspace.directory)).length) throw new Error('OpenCode changed the disposable sample. Result rejected.')
+      const repairFile = path.join(workspace.directory, '.project-lens-repair-request.json')
+      await writeFile(repairFile, `${evidencePrompt(raw)}\nRepair these validation errors only: ${issues.join('; ')}\nPrevious output: ${JSON.stringify(presentation)}`, 'utf8')
+      integrityBaseline = await fileManifest(workspace.directory)
+      const repairArgs = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...buildAnalysisArgs(modelId, workspace.directory, repairFile, variant)]
+      const repair = await runOpenCode(executable, repairArgs, '', options)
+      if (changedFiles(integrityBaseline, await fileManifest(workspace.directory)).length) throw new Error('OpenCode changed the disposable sample. Result rejected.')
       try { presentation = JSON.parse(extractOpenCodeText(repair.stdout)) } catch { throw new Error('OpenCode repair did not return structured JSON.') }
       issues = validatePresentationKnowledgeBase(presentation, raw)
     }

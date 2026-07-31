@@ -34,4 +34,11 @@ describe('provider authentication flow', () => {
     expect(launcher).toContain('setPopupStyle({ top, left, width')
     expect(launcher).toContain('style={popupStyle}')
   })
+
+  it('delivers analysis evidence through an isolated attachment instead of stdin', async () => {
+    const server = await readFile(new URL('../src/local-api/server.ts', import.meta.url), 'utf8')
+    expect(server).toContain(".project-lens-request.json")
+    expect(server).toContain("runOpenCode(executable, args, '', options)")
+    expect(server).toContain("buildAnalysisArgs(modelId, workspace.directory, requestFile, variant)")
+  })
 })

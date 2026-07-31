@@ -6,7 +6,8 @@ import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelDto, 
 export interface OpenCodeExecutable { path: string; version: string }
 export interface OpenCodeRunResult { stdout: string; stderr: string; code: number | null }
 export type OpenCodeTimeoutType = 'process-start' | 'provider-first-response' | 'inactivity' | 'total-run'
-export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number }
+export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number; onStdoutEvent?: (event: Record<string, unknown>) => void }
+export const OPEN_CODE_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 4 * 60_000, inactivityMs: 2 * 60_000, totalRunMs: 10 * 60_000 } as const
 export class OpenCodeTimeoutError extends Error { readonly timeoutType: OpenCodeTimeoutType; constructor(timeoutType: OpenCodeTimeoutType) { super(`OpenCode timed out (${timeoutType}).`); this.timeoutType = timeoutType; this.name = 'OpenCodeTimeoutError' } }
 export class OpenCodeFailureError extends Error {
   readonly code: AnalysisFailureCode
@@ -49,25 +50,34 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
   return new Promise((resolve, reject) => {
     const { cwd = process.cwd(), env = process.env, signal } = options
     const child = spawn(executable, args, { cwd, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
-    let stdout = ''; let stderr = ''; let timeout: OpenCodeTimeoutType | undefined; let receivedOutput = false
+    let stdout = ''; let stderr = ''; let timeout: OpenCodeTimeoutType | undefined; let receivedOutput = false; let runtimeFailure: OpenCodeFailureError | undefined; let eventBuffer = ''
     const timers: NodeJS.Timeout[] = []
     const terminate = () => { if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { shell: false, windowsHide: true, stdio: 'ignore' }); else child.kill('SIGTERM') }
     const stopTimers = () => timers.splice(0).forEach(clearTimeout)
     const failAfter = (milliseconds: number | undefined, type: OpenCodeTimeoutType) => { if (milliseconds) timers.push(setTimeout(() => { timeout = type; terminate() }, milliseconds)) }
-    const restartInactivity = () => { const index = timers.findIndex((timer) => timer === inactivityTimer); if (index >= 0) { clearTimeout(timers[index]); timers.splice(index, 1) }; inactivityTimer = setTimeout(() => { timeout = 'inactivity'; terminate() }, options.inactivityTimeoutMs ?? 90_000); timers.push(inactivityTimer) }
+    const restartInactivity = () => { const index = timers.findIndex((timer) => timer === inactivityTimer); if (index >= 0) { clearTimeout(timers[index]); timers.splice(index, 1) }; inactivityTimer = setTimeout(() => { timeout = 'inactivity'; terminate() }, options.inactivityTimeoutMs ?? OPEN_CODE_TIMEOUTS.inactivityMs); timers.push(inactivityTimer) }
     let inactivityTimer: NodeJS.Timeout
-    failAfter(options.processStartTimeoutMs ?? 15_000, 'process-start')
-    failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? 12 * 60_000, options.timeoutType ?? 'total-run')
-    child.once('spawn', () => { stopTimers(); failAfter(options.firstResponseTimeoutMs ?? 75_000, 'provider-first-response'); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? 12 * 60_000, options.timeoutType ?? 'total-run') })
+    const processEventLine = (line: string) => { if (!line.trim()) return; try { const parsed = JSON.parse(line) as Record<string, unknown>; if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') }; restartInactivity(); options.onStdoutEvent?.(parsed) } catch { /* Ignore non-JSON stdout; stderr is the diagnostic channel. */ } }
+    failAfter(options.processStartTimeoutMs ?? OPEN_CODE_TIMEOUTS.processStartMs, 'process-start')
+    failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run')
+    child.once('spawn', () => { stopTimers(); failAfter(options.firstResponseTimeoutMs ?? OPEN_CODE_TIMEOUTS.firstResponseMs, 'provider-first-response'); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') })
     const abort = () => terminate()
     signal?.addEventListener('abort', abort, { once: true })
-    child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? 12 * 60_000, options.timeoutType ?? 'total-run') }; restartInactivity(); if (stdout.length > 1_000_000) terminate() })
-    child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); if (stderr.length > 100_000) terminate() })
+    child.stdout.on('data', (data: Buffer) => { const text = data.toString(); stdout += text; eventBuffer += text; const lines = eventBuffer.split(/\r?\n/); eventBuffer = lines.pop() ?? ''; lines.forEach(processEventLine); if (stdout.length > 1_000_000) terminate() })
+    child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); if (/quota|rate[ -]?limit|\b429\b/i.test(stderr) && !runtimeFailure) { runtimeFailure = new OpenCodeFailureError('free-quota-or-rate-limit', redact(stderr)); terminate() }; if (stderr.length > 100_000) terminate() })
     child.once('error', (error) => { stopTimers(); reject(error) })
-    child.once('close', (code) => { stopTimers(); signal?.removeEventListener('abort', abort); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); resolve({ stdout, stderr, code }) })
+    child.once('close', (code) => { if (eventBuffer.trim()) processEventLine(eventBuffer); stopTimers(); signal?.removeEventListener('abort', abort); if (runtimeFailure) return reject(runtimeFailure); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); resolve({ stdout, stderr, code }) })
     child.stdin.end(input)
   })
 }
+
+export function buildAnalysisArgs(modelId: string, workspaceDirectory: string, requestFile: string, variant?: string) {
+  const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspaceDirectory, '--file', requestFile, 'Read the attached Project Lens request and return only the required JSON.']
+  if (variant) args.push('--variant', variant)
+  return args
+}
+
+export function openCodeDiagnosticArgs(enabled: boolean) { return enabled ? ['--print-logs', '--log-level', 'DEBUG'] : [] }
 
 export function launchOpenCodeAuth(executable: string, _providerId: string, onClose: (code: number | null) => void, onError: (error: Error) => void) {
   const isWindows = process.platform === 'win32'
@@ -185,5 +195,7 @@ export function extractOpenCodeText(output: string): string {
   }
   return text.at(-1) ?? output.trim()
 }
+
+export function parseOpenCodeEvents(output: string) { return output.split(/\r?\n/).filter((line) => line.trim()).flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }) }
 
 export function redact(value: string) { return value.replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500) }
