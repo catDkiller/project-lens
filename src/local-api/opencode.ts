@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -9,7 +10,7 @@ import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelDto, 
 export interface OpenCodeExecutable { path: string; version: string }
 export interface OpenCodeRunResult { stdout: string; stderr: string; code: number | null }
 export type OpenCodeTimeoutType = 'process-start' | 'provider-first-response' | 'inactivity' | 'total-run'
-export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number; onStdoutEvent?: (event: Record<string, unknown>) => void }
+export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number; onStdoutEvent?: (event: Record<string, unknown>) => void; onProcessHandle?: (child: ChildProcess) => void; onProcessStarted?: (pid: number) => void; onProcessExited?: (code: number | null) => void; onProcessError?: (error: Error) => void }
 export const OPEN_CODE_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 4 * 60_000, inactivityMs: 2 * 60_000, totalRunMs: 10 * 60_000 } as const
 export const PROJECT_LENS_REQUEST_SCHEMA_MARKER = 'project-lens-request-v1'
 export const OPEN_CODE_RUN_PROMPT = 'Read the attached Project Lens request, inspect the approved project when needed, and return only the required structured JSON.'
@@ -115,6 +116,7 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
   return new Promise((resolve, reject) => {
     const { cwd = process.cwd(), env = process.env, signal } = options
     const child = spawn(executable, args, { cwd, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    options.onProcessHandle?.(child)
     let stdout = ''; let stderr = ''; let timeout: OpenCodeTimeoutType | undefined; let receivedOutput = false; let runtimeFailure: OpenCodeFailureError | undefined; let eventBuffer = ''
     const timers: NodeJS.Timeout[] = []
     const terminate = () => { if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { shell: false, windowsHide: true, stdio: 'ignore' }); else child.kill('SIGTERM') }
@@ -125,13 +127,13 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
     const processEventLine = (line: string) => { if (!line.trim()) return; try { const parsed = JSON.parse(line) as Record<string, unknown>; if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') }; restartInactivity(); options.onStdoutEvent?.(parsed) } catch { /* Ignore non-JSON stdout; stderr is the diagnostic channel. */ } }
     failAfter(options.processStartTimeoutMs ?? OPEN_CODE_TIMEOUTS.processStartMs, 'process-start')
     failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run')
-    child.once('spawn', () => { stopTimers(); failAfter(options.firstResponseTimeoutMs ?? OPEN_CODE_TIMEOUTS.firstResponseMs, 'provider-first-response'); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') })
+    child.once('spawn', () => { stopTimers(); if (child.pid) options.onProcessStarted?.(child.pid); failAfter(options.firstResponseTimeoutMs ?? OPEN_CODE_TIMEOUTS.firstResponseMs, 'provider-first-response'); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') })
     const abort = () => terminate()
     signal?.addEventListener('abort', abort, { once: true })
     child.stdout.on('data', (data: Buffer) => { const text = data.toString(); stdout += text; eventBuffer += text; const lines = eventBuffer.split(/\r?\n/); eventBuffer = lines.pop() ?? ''; lines.forEach(processEventLine); if (stdout.length > 1_000_000) terminate() })
     child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); if (/quota|rate[ -]?limit|\b429\b/i.test(stderr) && !runtimeFailure) { runtimeFailure = new OpenCodeFailureError('free-quota-or-rate-limit', redact(stderr)); terminate() }; if (stderr.length > 100_000) terminate() })
-    child.once('error', (error) => { stopTimers(); reject(error) })
-    child.once('close', (code) => { if (eventBuffer.trim()) processEventLine(eventBuffer); stopTimers(); signal?.removeEventListener('abort', abort); if (runtimeFailure) return reject(runtimeFailure); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); resolve({ stdout, stderr, code }) })
+    child.once('error', (error) => { stopTimers(); options.onProcessError?.(error); reject(error) })
+    child.once('close', (code) => { if (eventBuffer.trim()) processEventLine(eventBuffer); stopTimers(); signal?.removeEventListener('abort', abort); options.onProcessExited?.(code); if (runtimeFailure) return reject(runtimeFailure); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); resolve({ stdout, stderr, code }) })
     child.stdin.end(input)
   })
 }

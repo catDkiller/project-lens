@@ -71,7 +71,8 @@ describe('presentation knowledge workspace', () => {
   it('shows elapsed and stalled status from event timestamps without inventing progress', () => {
     const markup = renderToStaticMarkup(<AnalysisProgress projectName="python-project" startedAt={Date.now() - 130_000} modelId="provider/model" events={[{ type: 'analysing', message: 'Inspecting src/app.ts', timestamp: new Date(Date.now() - 130_000).toISOString() }]} onCancel={vi.fn()} />)
     expect(markup).toContain('Elapsed:')
-    expect(markup).toContain('OpenCode is still running')
+    expect(markup).toContain('No response has been received from OpenCode yet.')
+    expect(markup).toContain('OpenCode response: none received')
     expect(markup).not.toContain('%')
   })
 

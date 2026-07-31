@@ -41,6 +41,8 @@ describe('OpenCode process harness', () => {
   it('runs the exact opencode invocation with streamed events and preserves the workspace', async () => {
     const harness = await buildHarness()
     const events: Record<string, unknown>[] = []
+    const startedPids: number[] = []
+    const exitedCodes: Array<number | null> = []
     const before = await fileManifest(harness.workspace.directory)
     const result = await runOpenCode(fakeExecutable, [fakeScript, ...buildAnalysisArgs('opencode/deepseek-v4-flash-free', harness.workspace.directory, harness.requestFile)], '', {
       cwd: harness.workspace.directory,
@@ -49,10 +51,15 @@ describe('OpenCode process harness', () => {
       inactivityTimeoutMs: 500,
       totalRunTimeoutMs: 1_000,
       processStartTimeoutMs: 500,
+      onProcessStarted: (pid) => startedPids.push(pid),
+      onProcessExited: (code) => exitedCodes.push(code),
       onStdoutEvent: (event) => events.push(event),
     })
 
     expect(result.code).toBe(0)
+    expect(startedPids).toHaveLength(1)
+    expect(startedPids[0]).toBeGreaterThan(0)
+    expect(exitedCodes).toEqual([0])
     expect(events.some((event) => event.type === 'web-research' && event.outcome === 'used-successfully')).toBe(true)
     expect(validatePresentationKnowledgeBase(JSON.parse(extractOpenCodeText(result.stdout)), harness.raw)).toEqual([])
     expect(changedFiles(before, await fileManifest(harness.workspace.directory))).toEqual([])
