@@ -1,20 +1,38 @@
 import type { PresentationKnowledgeBase } from '../knowledge'
-export type WebResearchOutcome = 'not-requested' | 'configured' | 'used-successfully' | 'attempted-but-unavailable' | 'failed'
 
-export type AgentReadinessDto = 'unavailable' | 'installed' | 'needs-authentication' | 'ready' | 'unhealthy'
-export interface AgentCapabilitiesDto { projectRead: boolean; projectSearch: boolean; webSearch: boolean; webFetch: boolean; streaming: boolean; structuredOutput: boolean; modelDiscovery: boolean; authenticationDetection: boolean; cancellation: boolean; readOnlyEnforcement: boolean }
-export interface AgentStatusDto { id: string; displayName: string; installed: boolean; executablePath?: string; version?: string; status: 'available' | 'unavailable'; readiness?: AgentReadinessDto; authenticationStatus?: 'disconnected' | 'launching' | 'waiting-for-user' | 'connected' | 'cancelled' | 'launch-failed' | 'verification-failed'; authenticationMethod?: string; capabilities?: AgentCapabilitiesDto; error?: string }
-export type ProviderConnectionStatus = 'connected' | 'setup-required' | 'checking' | 'authentication-in-progress' | 'connection-failed' | 'unavailable' | 'unknown'
-export interface ProviderDto { id: string; displayName: string; connected: boolean; discovered?: boolean; connectionMethod?: string; connectionStatus?: ProviderConnectionStatus; connectedBy?: string; lastCheckedAt?: string; diagnosticCode?: string }
-export type ProviderAuthState = 'disconnected' | 'launching' | 'waiting-for-user' | 'connected' | 'cancelled' | 'terminal-closed-before-completion' | 'launch-failed' | 'verification-failed'
-export interface ProviderAuthSessionDto { id: string; providerId: string; status: ProviderAuthState; message: string; startedAt: string; command?: string }
-export type ModelAvailability = 'available' | 'ready' | 'requires-provider' | 'unavailable' | 'unknown'
-export type ModelCost = 'explicit-free' | 'usage-priced' | 'unknown'
-export type ModelReadinessDto = 'ready' | 'setup-required' | 'unavailable' | 'stale' | 'unknown' | 'catalogue-only' | 'requires-provider' | 'temporarily-unavailable' | 'removed'
-export interface ModelDto { providerId: string; modelId: string; fullId: string; displayName: string; availability: ModelAvailability; cost?: ModelCost; readiness?: ModelReadinessDto; catalogued?: boolean; providerConnected?: boolean; free?: boolean; explicitlyFree?: boolean; connected?: boolean; runnable?: boolean; readinessReason?: string; availabilityReason?: string; local?: boolean; variant?: string; lastCheckedAt?: string }
-export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'starting-agent' | 'analysing' | 'validating' | 'completed' | 'failed' | 'cancelled'
-export type AnalysisRunState = 'queued' | 'preparing-project' | 'spawning-agent' | 'agent-process-running' | 'waiting-for-provider' | 'receiving-agent-events' | 'validating' | 'completed' | 'cancelling' | 'cancelled' | 'failed' | 'interrupted'
-export type AnalysisFailureCode = 'provider-authentication-required' | 'provider-authentication-failed' | 'provider-billing-required' | 'provider-rate-limited' | 'provider-temporarily-unavailable' | 'provider-error' | 'model-output-too-long' | 'analysis-aborted' | 'free-quota-or-rate-limit' | 'model-unavailable' | 'network-or-provider-failure' | 'invalid-opencode-arguments' | 'permission-or-configuration-failure' | 'process-startup-failure' | 'parser-failure' | 'opencode-database-busy' | 'opencode-incompatible-version' | 'unknown'
-export interface AnalysisEventDto { type: AnalysisEventType; message?: string; timestamp?: string; path?: string; diagnostic?: { code?: AnalysisFailureCode; timeoutType?: string; exitCode?: number | null; stderr?: string; modelId?: string; lastActivity?: string; structuredErrorName?: string; statusCode?: number; providerId?: string; retryable?: boolean; webResearchOutcome?: WebResearchOutcome; webResearchSource?: { title: string; url: string } }; result?: PresentationKnowledgeBase; error?: string }
-export interface AnalysisRunStatusDto { runId: string; projectId: string; agentId: string; modelId: string; openCodeVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed' | 'interrupted'; events: AnalysisEventDto[]; diagnosticSummary?: { eventTypes: string[]; stdoutBytes: number; stderrBytes: number; providerRequestBegan: boolean; textOutputReceived: boolean; structuredErrorName?: string; statusCode?: number } }
+export interface CodexStatusDto {
+  status: 'checking' | 'ready' | 'sign-in-required' | 'unavailable'
+  version?: string
+  error?: string
+}
+
+export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'starting-agent' | 'analysing' | 'validating' | 'repairing' | 'completed' | 'failed' | 'cancelled'
+export type AnalysisRunState = 'queued' | 'preparing-project' | 'spawning-agent' | 'agent-process-running' | 'receiving-agent-events' | 'validating' | 'repairing' | 'completed' | 'cancelling' | 'cancelled' | 'failed'
+export type AnalysisFailureCode = 'codex-unavailable' | 'codex-sign-in-required' | 'codex-invocation-failed' | 'process-startup-failure' | 'output-invalid' | 'analysis-aborted' | 'unknown'
+
+export interface AnalysisEventDto {
+  type: AnalysisEventType
+  message?: string
+  timestamp?: string
+  diagnostic?: { code?: AnalysisFailureCode; exitCode?: number | null; stderr?: string; codexVersion?: string; lastActivity?: string }
+  result?: PresentationKnowledgeBase
+  error?: string
+}
+
+export interface AnalysisRunStatusDto {
+  runId: string
+  projectId: string
+  agentId: 'codex'
+  codexVersion?: string
+  state: AnalysisRunState
+  createdAt: string
+  startedAt?: string
+  childPid?: number
+  lastAnyEventAt?: string
+  lastGenuineAgentEventAt?: string
+  cancellationRequested: boolean
+  terminalOutcome?: 'completed' | 'cancelled' | 'failed'
+  events: AnalysisEventDto[]
+}
+
 export interface AnalysisStartDto { runId: string }

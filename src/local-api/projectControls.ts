@@ -4,8 +4,8 @@ import path from 'node:path'
 export interface QuarantinedProjectControl { path: string; kind: 'instruction' | 'configuration' | 'plugin-or-rule'; content: string; truncated: boolean }
 const MAX_FILE_BYTES = 32_768
 const MAX_TOTAL_BYTES = 128_000
-const exactFiles = new Set(['agents.md', 'claude.md', 'context.md', 'opencode.json', 'opencode.jsonc', 'copilot-instructions.md', '.mcp.json', '.cursorrules', '.clinerules', '.windsurfrules'])
-const controlDirectories = new Set(['.opencode', '.claude', '.cursor', '.agents', '.windsurf'])
+const exactFiles = new Set(['agents.md', 'claude.md', 'context.md', 'copilot-instructions.md', '.mcp.json', '.cursorrules', '.clinerules', '.windsurfrules'])
+const controlDirectories = new Set(['.claude', '.cursor', '.agents', '.windsurf'])
 
 function classify(relative: string): QuarantinedProjectControl['kind'] | undefined {
   const parts = relative.replaceAll('\\', '/').split('/'); const name = parts.at(-1)!.toLowerCase()

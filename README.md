@@ -1,44 +1,28 @@
 # Project Lens
 
-## Problem
+Project Lens explains a React/Vite project through deterministic inspection plus Codex. It runs a safe copy of the selected project, validates the generated knowledge base, and presents an Overview, Complete Guide, Explore, and Review workspace.
 
-Coding agents can produce working software faster than their creators can understand it. Project Lens helps people inspect an AI-built React/Vite project, identify the files behind a feature, and learn what is worth carrying forward.
+## Theme 2: UX for Agentic Applications
 
-## Theme 2 — UX for Agentic Applications
+The interface makes a local coding agent understandable: the user chooses a project, sees factual progress, and browses evidence-backed output instead of a chat transcript.
 
-The product makes agent-created project structure legible: it starts from a project source, shows analysis progress, and will guide a learner through feature-level evidence rather than an opaque generated answer.
+## Locked MVP
 
-## Current MVP
+- Prepared React/Vite sample and safe local React/Vite folder import
+- Deterministic inventory, imports, and project-part detection
+- Codex CLI with existing ChatGPT sign-in
+- Disposable read-only workspace, control-file quarantine, output validation, cancellation, and cleanup
 
-- Generic agent-adapter contract with OpenCode as the first real adapter.
-- OpenCode detection and real configured-model discovery through a loopback-only local runtime.
-- Analyse the prepared React/Vite sample with a selected OpenCode model, then validate its structured result before opening the existing workspace.
-- Use the committed prepared presentation as a clearly separate no-AI fallback.
-- Run deterministic inventory, static-import, relationship, and project-part analysis.
-- Transform the result into one reusable project knowledge base used by Overview, Guide, Explore, and Review views.
-- Switch between accessible light/dark themes and accent tokens.
-- Keep current web documentation available as a toggled, read-only analysis capability.
-- Deploy a public, no-login static site.
+## Postponed
 
-The prepared sample is the guaranteed demo. Sources normalize into the same project shape so local-folder and GitHub adapters can be added later without changing the learning workspace.
-
-## Postponed features
-
-- Local-folder access and GitHub URL fetching.
-- Other CLI adapters, Codex API calls, authentication, persistence, database, routing, and automatic refactoring.
-- Frameworks beyond React/Vite.
+GitHub import, multiple agents, model selection, API keys, automatic refactoring, and databases.
 
 ## Local development
 
-```bash
+```powershell
 npm install
 npm run dev
 npm run test
+npm run lint
 npm run build
 ```
-
-## Architecture
-
-The stable deterministic analyser lives in `src/analysis/`. `src/local-api/` is a small Node runtime bound to `127.0.0.1`; it discovers OpenCode with the documented CLI, runs only the materialized `prepared-sample-project/`, validates output, and caches valid results by sample fingerprint and selected model. The approved Open Design reference remains read-only in `open-design-ui-prototype/`.
-
-See [CODEX_HANDOFF.md](CODEX_HANDOFF.md) for the component map, current limits, and deployment notes.
