@@ -220,9 +220,11 @@ export const daemon = createServer(async (req, res) => {
       return send(res, 202, { status: 'cancelling', runId: run.runId })
     }
     if (req.method === 'GET' && match[2] === 'events') {
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); let index = 0
-      const timer = setInterval(() => { while (index < run.events.length) { const current = run.events[index++]; res.write(`event: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) { clearInterval(timer); res.end() } } }, 100)
-      req.on('close', () => clearInterval(timer)); return
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); let index = 0; let finished = false
+      const finish = () => { if (finished) return; finished = true; clearInterval(timer); req.removeListener('close', onClose); res.removeListener('close', onResponseClose); if (!res.writableEnded) res.end() }
+      const onClose = () => finish(); const onResponseClose = () => finish()
+      const timer = setInterval(() => { if (finished || res.writableEnded) return finish(); while (index < run.events.length && !finished) { const current = run.events[index++]; if (res.writableEnded) return finish(); res.write(`event: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) finish() } }, 100)
+      req.on('close', onClose); res.on('close', onResponseClose); return
     }
   }
   send(res, 404, { error: 'Not found.' })

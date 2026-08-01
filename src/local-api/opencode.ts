@@ -191,15 +191,16 @@ export async function inspectOpenCodeDatabase(databasePath: string): Promise<Ope
 
 export function openCodeDiagnosticArgs(enabled: boolean) { return enabled ? ['--print-logs', '--log-level', 'DEBUG'] : [] }
 
-export function launchOpenCodeAuth(executable: string, _providerId: string, onClose: (code: number | null) => void, onError: (error: Error) => void) {
+export function launchOpenCodeAuth(executable: string, providerId: string, onClose: (code: number | null) => void, onError: (error: Error) => void) {
   const isWindows = process.platform === 'win32'
-  // OpenCode 1.18.5 treats the positional auth argument as a URL/provider
-  // selector. Launch the normal TUI instead so the user can choose OpenCode
-  // Zen through `/connect` without Project Lens guessing a CLI argument.
-  const command = 'opencode'
-  const child = isWindows
-    ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'start', '"Project Lens OpenCode connection"', '/wait', 'cmd.exe', '/k', executable], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
-    : spawn(executable, [], { cwd: process.cwd(), shell: false, detached: true, stdio: 'ignore' })
+  const args = ['auth', 'login', '--provider', providerId]
+  const command = [executable, ...args].join(' ')
+  const wt = isWindows ? (process.env.PATH ?? '').split(path.delimiter).map((dir) => path.join(dir, 'wt.exe')).find((candidate) => existsSync(candidate)) : undefined
+  const child = wt
+    ? spawn(wt, ['new-tab', '--title', 'Project Lens OpenCode connection', executable, ...args], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
+    : isWindows
+      ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'start', '"Project Lens OpenCode connection"', '/wait', 'cmd.exe', '/k', executable, ...args], { cwd: process.cwd(), shell: false, windowsHide: false, detached: true, stdio: 'ignore' })
+    : spawn(executable, args, { cwd: process.cwd(), shell: false, detached: true, stdio: 'ignore' })
   child.once('close', onClose)
   child.once('error', onError)
   child.unref()
@@ -230,7 +231,8 @@ export async function discoverProviders(executable: string): Promise<ProviderDto
     if (match) { const id = match[1].toLowerCase().replace(/\s+/g, '-'); const method = /^(api|oauth)$/i.test(match[2]) ? match[2].toLowerCase() : 'env'; connected.set(id, { id, displayName: match[1], connected: true, connectionMethod: method }) }
   }
   for (const model of models) if (!connected.has(model.providerId)) connected.set(model.providerId, { id: model.providerId, displayName: model.providerId, connected: false })
-  return [...connected.values()].sort((a, b) => a.id.localeCompare(b.id))
+  const checkedAt = new Date().toISOString()
+  return [...connected.values()].map((provider): ProviderDto => ({ ...provider, discovered: true, connectionStatus: provider.connected ? 'connected' : 'setup-required', connectedBy: provider.connected ? provider.connectionMethod : undefined, lastCheckedAt: checkedAt })).sort((a, b) => a.id.localeCompare(b.id))
 }
 
 export async function probeOpenCodeReadiness(executable: string, signal?: AbortSignal, retryDelaysMs = [1_000, 2_000, 4_000], onRetry?: (attempt: number, delayMs: number) => void) {
@@ -267,10 +269,13 @@ export function mapOpenCodeModels(output: string): ModelDto[] {
 /** Catalogue output is not proof that a model can run. Enrich it only after auth discovery. */
 export function applyProviderAvailability(models: ModelDto[], providers: ProviderDto[]): ModelDto[] {
   const connected = new Map(providers.map((provider) => [provider.id, provider.connected]))
+  const checkedAt = new Date().toISOString()
   return models.map((model) => {
     const isConnected = connected.get(model.providerId)
     const availability: ModelAvailability = isConnected === true ? 'ready' : isConnected === false ? 'requires-provider' : 'unknown'
-    return { ...model, availability, connected: isConnected === true, runnable: isConnected === true, availabilityReason: isConnected === true ? undefined : isConnected === false ? 'Connect this provider in OpenCode first.' : 'Provider availability could not be confirmed.' }
+    const readiness: ModelDto['readiness'] = isConnected === true ? 'ready' : isConnected === false ? 'setup-required' : 'unknown'
+    const reason = isConnected === true ? undefined : isConnected === false ? 'Connect this provider in OpenCode first.' : 'Provider availability could not be confirmed.'
+    return { ...model, availability, readiness, catalogued: true, providerConnected: isConnected === true, connected: isConnected === true, runnable: isConnected === true, explicitlyFree: model.free === true, readinessReason: reason, availabilityReason: reason, lastCheckedAt: checkedAt }
   })
 }
 

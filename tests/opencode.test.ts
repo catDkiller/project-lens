@@ -55,8 +55,14 @@ describe('OpenCode local adapter', () => {
 
   it('marks a connected OpenCode provider as ready', () => {
     const [model] = applyProviderAvailability(mapOpenCodeModels('opencode/deepseek-v4-flash-free'), [{ id: 'opencode', displayName: 'OpenCode', connected: true }])
-    expect(model).toMatchObject({ availability: 'ready', runnable: true })
+    expect(model).toMatchObject({ availability: 'ready', readiness: 'ready', catalogued: true, providerConnected: true, explicitlyFree: false, runnable: true })
     expect(canStartOpenCodeAnalysis(model)).toBe(true)
+  })
+
+  it('keeps catalogue and readiness separate for setup-required providers', () => {
+    const [model] = applyProviderAvailability(mapOpenCodeModels('opencode/deepseek:free'), [{ id: 'opencode', displayName: 'OpenCode', connected: false }])
+    expect(model).toMatchObject({ catalogued: true, providerConnected: false, readiness: 'setup-required', readinessReason: 'Connect this provider in OpenCode first.', explicitlyFree: true })
+    expect(canStartOpenCodeAnalysis(model)).toBe(false)
   })
 
   it('maps known failures to specific, safe recovery categories', () => {

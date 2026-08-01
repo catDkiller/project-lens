@@ -21,13 +21,17 @@ type FolderInput = HTMLInputElement & { webkitdirectory?: boolean }
 async function fromDirectory(handle: DirectoryHandle, prefix = ''): Promise<{ path: string; file: File }[]> { const found: { path: string; file: File }[] = []; for await (const child of handle.values()) { const childPath = `${prefix}${child.name}`; if (child.kind === 'directory') found.push(...await fromDirectory(child as DirectoryHandle, `${childPath}/`)); else found.push({ path: childPath, file: await (child as FileSystemFileHandle).getFile() }) }; return found }
 async function readLocalFiles(entries: { path: string; file: File }[]) { const skippedByReason: Record<LocalSkipReason, number> = { 'dependency-generated': 0, sensitive: 0, 'binary-unsupported': 0, oversized: 0, unsafe: 0 }; const candidates: { path: string; content: string; size: number }[] = []; for (const entry of entries) { const reason = classifyLocalPath(entry.path, entry.file.size); if (!acceptsLocalPath(entry.path, entry.file.size)) { if (reason) skippedByReason[reason]++; continue }; candidates.push({ path: entry.path, content: await entry.file.text(), size: entry.file.size }) }; const prepared = prepareLocalFiles(candidates); for (const key of Object.keys(skippedByReason) as LocalSkipReason[]) skippedByReason[key] += prepared.skippedByReason[key]; return { ...prepared, skipped: Object.values(skippedByReason).reduce((total, count) => total + count, 0), skippedByReason } }
 function FolderIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.5Z" /></svg> }
+function ModelGroup({ label, models, selectedId, highlightedId, onHighlight, onChoose, status }: { label: string; models: ModelDto[]; selectedId?: string; highlightedId?: string; onHighlight: (id: string) => void; onChoose: (model: ModelDto) => void; status: string }) {
+  if (!models.length) return null
+  return <section className="model-provider-group" aria-label={label}><p>{label}</p>{models.map((item) => <button key={item.fullId} className={`model-option${item.fullId === selectedId ? ' selected' : ''}${item.fullId === highlightedId ? ' highlighted' : ''}`} disabled={status === 'Unavailable'} title={item.fullId} type="button" onPointerMove={() => onHighlight(item.fullId)} onFocus={() => onHighlight(item.fullId)} onClick={() => onChoose(item)}><strong>{item.displayName}</strong><span>{item.providerId} · {item.free || item.explicitlyFree ? 'Free · ' : ''}{status}</span></button>)}</section>
+}
 
 export function Launcher({ agent, models = [], providers = [], authSession, runtimeStatus = 'Checking local runtime…', isAnalysing, analysisStage, error, appearance, accent, selectedProjectName, selectedProjectSummary, selectedProjectSkipped, webResearchEnabled, onAppearance, onAccent, onWebResearchEnabled, onTrySample, onUsePrepared, onImportLocal, onCancel, onRefreshProviders = () => {}, onRefreshModels = () => {}, onConnectProvider = () => {}, onDisconnectProvider = () => {}, onCheckConnection = () => {}, onCancelConnection = () => {} }: LauncherProps) {
   const triggerRef = useRef<HTMLButtonElement>(null); const pickerRef = useRef<FolderInput>(null); const restoreFocusRef = useRef(true); const [model, setModel] = useState(() => typeof localStorage === 'undefined' ? '' : localStorage.getItem('project-lens-model') ?? ''); const [open, setOpen] = useState(false); const [query, setQuery] = useState(''); const [highlightedId, setHighlightedId] = useState<string>(); const [folderStatus, setFolderStatus] = useState(''); const [readingFolder, setReadingFolder] = useState(false); const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
-  const selected = models.find((item) => item.fullId === model); const canChoose = (item?: ModelDto) => Boolean(item && item.runnable !== false && item.availability !== 'requires-provider' && item.availability !== 'unavailable'); const ready = selected?.runnable === true || selected?.availability === 'available'; const waiting = authSession?.status === 'launching' || authSession?.status === 'waiting-for-user'; const visible = models.filter((item) => `${item.displayName} ${item.providerId} ${item.fullId}`.toLowerCase().includes(query.toLowerCase())); const selectable = visible.filter(canChoose); const skipped = Object.entries(selectedProjectSkipped ?? {}).filter(([, count]) => count)
+  const selected = models.find((item) => item.fullId === model); const isReady = (item?: ModelDto) => Boolean(item && (item.readiness === 'ready' || (item.readiness === undefined && item.runnable === true && item.availability === 'ready'))); const canChoose = isReady; const ready = isReady(selected); const waiting = authSession?.status === 'launching' || authSession?.status === 'waiting-for-user'; const visible = models.filter((item) => `${item.displayName} ${item.providerId} ${item.fullId}`.toLowerCase().includes(query.toLowerCase())); const selectable = visible.filter(canChoose); const readyModels = visible.filter(isReady); const setupModels = visible.filter((item) => item.readiness === 'setup-required' || item.availability === 'requires-provider'); const unavailableModels = visible.filter((item) => !isReady(item) && !setupModels.includes(item)); const skipped = Object.entries(selectedProjectSkipped ?? {}).filter(([, count]) => count)
   useEffect(() => { if (pickerRef.current) pickerRef.current.webkitdirectory = true }, [])
-  useEffect(() => { if (typeof localStorage === 'undefined') return; if (selected) localStorage.setItem('project-lens-model', selected.fullId); else localStorage.removeItem('project-lens-model') }, [selected])
-  useEffect(() => { if (!open) return; const matching = models.filter((item) => `${item.displayName} ${item.providerId} ${item.fullId}`.toLowerCase().includes(query.toLowerCase())).filter((item) => item.runnable !== false && item.availability !== 'requires-provider' && item.availability !== 'unavailable'); setHighlightedId(matching.find((item) => item.fullId === selected?.fullId)?.fullId ?? matching[0]?.fullId) }, [open, query, models, selected?.fullId])
+  useEffect(() => { if (typeof localStorage === 'undefined' || !selected) return; localStorage.setItem('project-lens-model', selected.fullId) }, [selected])
+  useEffect(() => { if (!open) return; const matching = models.filter((item) => `${item.displayName} ${item.providerId} ${item.fullId}`.toLowerCase().includes(query.toLowerCase())).filter(isReady); setHighlightedId(matching.find((item) => item.fullId === selected?.fullId)?.fullId ?? matching[0]?.fullId) }, [open, query, models, selected?.fullId])
   useLayoutEffect(() => {
     if (!open) return
     const position = () => {
@@ -41,7 +45,7 @@ export function Launcher({ agent, models = [], providers = [], authSession, runt
   }, [open])
   useEffect(() => { if (!open) return; const trigger = triggerRef.current; const close = () => { restoreFocusRef.current = true; setOpen(false) }; const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }; const outside = (event: PointerEvent) => { if (!trigger?.contains(event.target as Node) && !(event.target as Element).closest('.model-popover')) close() }; document.addEventListener('keydown', onKeyDown); document.addEventListener('pointerdown', outside); return () => { document.removeEventListener('keydown', onKeyDown); document.removeEventListener('pointerdown', outside); if (restoreFocusRef.current) trigger?.focus() /* triggerRef.current?.focus() */ } }, [open])
   const closePopup = (restoreFocus = true) => { restoreFocusRef.current = restoreFocus; setOpen(false) }
-  const choose = (item?: ModelDto) => { if (!canChoose(item)) return; setModel(item!.fullId); closePopup() }
+  const choose = (item?: ModelDto) => { if (!item) return; setModel(item.fullId); if (isReady(item)) closePopup(); else if (item.readiness === 'setup-required' || item.availability === 'requires-provider') { closePopup(); onConnectProvider(item.providerId) } }
   const moveHighlight = (direction: 1 | -1) => { if (!selectable.length) return; const current = Math.max(0, selectable.findIndex((item) => item.fullId === highlightedId)); setHighlightedId(selectable[(current + direction + selectable.length) % selectable.length]?.fullId) }
   const finishFolder = (name: string, prepared: Awaited<ReturnType<typeof readLocalFiles>>) => { if (!prepared.files.length) { setFolderStatus('No supported project text files were found.'); return }; const summary = `${prepared.files.length} included · ${prepared.skipped} skipped · ${(prepared.size / 1024).toFixed(1)} KB`; setFolderStatus(summary); onImportLocal(name, prepared.files, summary, prepared.skippedByReason) }
   async function chooseFolder() { setReadingFolder(true); try { const chooser = (window as Window & { showDirectoryPicker?: () => Promise<DirectoryHandle> }).showDirectoryPicker; if (!chooser) { pickerRef.current?.click(); return }; const directory = await chooser(); finishFolder(directory.name, await readLocalFiles(await fromDirectory(directory))) } catch (reason) { setFolderStatus(reason instanceof DOMException && reason.name === 'AbortError' ? 'Folder selection cancelled.' : 'The folder could not be prepared locally.') } finally { setReadingFolder(false) } }
@@ -69,21 +73,10 @@ export function Launcher({ agent, models = [], providers = [], authSession, runt
         />
       </div>
       <div className="model-results" role="listbox">
-        {visible.map((item) => (
-          <button
-            key={item.fullId}
-            className={`model-option${item.fullId === selected?.fullId ? ' selected' : ''}${item.fullId === highlightedId ? ' highlighted' : ''}`}
-            disabled={!canChoose(item)}
-            title={item.fullId}
-            type="button"
-            onPointerMove={() => setHighlightedId(item.fullId)}
-            onFocus={() => setHighlightedId(item.fullId)}
-            onClick={() => choose(item)}
-          >
-            <strong>{item.displayName}</strong>
-            <span>{item.providerId} · {item.availability === 'requires-provider' ? 'Connection required' : item.fullId}</span>
-          </button>
-        ))}
+        <ModelGroup label="Ready to use" models={readyModels} selectedId={selected?.fullId} highlightedId={highlightedId} onHighlight={setHighlightedId} onChoose={choose} status="Ready" />
+        <ModelGroup label="Setup required" models={setupModels} selectedId={selected?.fullId} highlightedId={highlightedId} onHighlight={setHighlightedId} onChoose={choose} status="Setup required" />
+        <details className="model-unavailable"><summary>Unavailable ({unavailableModels.length})</summary><ModelGroup label="Unavailable" models={unavailableModels} selectedId={selected?.fullId} highlightedId={highlightedId} onHighlight={setHighlightedId} onChoose={choose} status="Unavailable" /></details>
+        {!visible.length && <p className="model-empty">No models match this search.</p>}
       </div>
     </div>,
     document.body,
@@ -118,7 +111,8 @@ export function Launcher({ agent, models = [], providers = [], authSession, runt
           </div>
         </div>
         <p className="privacy-note">Files are prepared locally. Relevant project text may be sent by OpenCode to your selected model provider. Sensitive and ignored files are excluded.</p>
-        {selected && !ready && <p className="folder-status">OpenCode is not connected. Connect OpenCode before using this model.</p>}
+        {!agent?.installed && <div className="provider-connection" role="status"><strong>OpenCode is required to run project analysis.</strong><p>Install OpenCode using the official package manager, then check again.</p><code>npm install -g opencode-ai</code><div className="provider-actions"><button type="button" onClick={() => void navigator.clipboard?.writeText('npm install -g opencode-ai')}>Copy install command</button><button type="button" onClick={onRefreshProviders}>Check again</button></div></div>}
+        {selected && !ready && <p className="folder-status">{selected.readinessReason ?? selected.availabilityReason ?? 'Connect the selected provider before analysing.'}</p>}
         {waiting && <p className="folder-status">Complete the connection in the OpenCode window. Analysis stays disabled until it is confirmed.</p>}
         {readingFolder && <p className="folder-status" role="status">Reading folder…</p>}
         {selectedProjectSummary && <p className="folder-status" role="status">{selectedProjectSummary}</p>}
