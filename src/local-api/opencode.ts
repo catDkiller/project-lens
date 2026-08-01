@@ -152,7 +152,7 @@ export function runOpenCode(executable: string, args: string[], input = '', opti
 }
 
 export function buildAnalysisArgs(modelId: string, workspaceDirectory: string, requestFile: string, variant?: string, supportsPure = false) {
-  const args = ['run', '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspaceDirectory, '--file', requestFile, OPEN_CODE_RUN_PROMPT]
+  const args = ['run', OPEN_CODE_RUN_PROMPT, '--format', 'json', '--agent', 'plan', '--model', modelId, '--dir', workspaceDirectory, '--file', requestFile]
   if (supportsPure) args.splice(1, 0, '--pure')
   if (variant) args.push('--variant', variant)
   return args

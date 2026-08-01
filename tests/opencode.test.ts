@@ -104,7 +104,7 @@ describe('OpenCode local adapter', () => {
 
   it('uses a short positional prompt and an attached request file', () => {
     const args = buildAnalysisArgs('google/gemini-2.5-pro', 'C:/temp/workspace', 'C:/temp/workspace/.project-lens-request.json')
-    expect(args).toEqual(['run', '--format', 'json', '--agent', 'plan', '--model', 'google/gemini-2.5-pro', '--dir', 'C:/temp/workspace', '--file', 'C:/temp/workspace/.project-lens-request.json', OPEN_CODE_RUN_PROMPT])
+    expect(args).toEqual(['run', OPEN_CODE_RUN_PROMPT, '--format', 'json', '--agent', 'plan', '--model', 'google/gemini-2.5-pro', '--dir', 'C:/temp/workspace', '--file', 'C:/temp/workspace/.project-lens-request.json'])
   })
 
   it('builds a versioned request file with schema, evidence, limitations, and web preference', async () => {
