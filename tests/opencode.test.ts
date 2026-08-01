@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyDatabaseDiagnostic, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, inspectOpenCodeDatabase, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl, validateOpenCodeCompatibility } from '../src/local-api/opencode'
 import { createOpenCodeAgent } from '../src/agents'
 import { createProjectKnowledgeBase } from '../src/knowledge'
 import { runProjectAnalysis } from '../src/analysis'
@@ -30,6 +30,8 @@ describe('OpenCode local adapter', () => {
     expect(JSON.parse(analysisEnvironment({}, true).OPENCODE_CONFIG_CONTENT!)).toEqual(analysisPermissionConfig(true))
     expect(analysisEnvironment({}, true).OPENCODE_ENABLE_EXA).toBe('1')
     expect(analysisEnvironment({}, false).OPENCODE_ENABLE_EXA).toBeUndefined()
+    expect(analysisEnvironment({}, true).OPENCODE_DISABLE_CLAUDE_CODE).toBe('1')
+    expect(analysisEnvironment({}, true).OPENCODE_DISABLE_AUTOUPDATE).toBe('1')
   })
 
   it('lists only IDs explicitly marked free', () => {
@@ -119,6 +121,18 @@ describe('OpenCode local adapter', () => {
   it('uses phase-aware timeout defaults and parses fragmented-safe NDJSON lines', () => {
     expect(OPEN_CODE_TIMEOUTS).toEqual({ processStartMs: 30_000, firstResponseMs: 240_000, inactivityMs: 120_000, totalRunMs: 600_000 })
     expect(parseOpenCodeEvents('{"type":"start"}\r\n\r\nnot-json\r\n{"type":"result"}')).toEqual([{ type: 'start' }, { type: 'result' }])
+  })
+
+  it('reports database sidecars without modifying them', async () => {
+    const result = await inspectOpenCodeDatabase(path.join(process.cwd(), 'missing-opencode-db'))
+    expect(result.warnings).toEqual([])
+  })
+  it('classifies database diagnostics without taking corrective action', () => {
+    expect(classifyDatabaseDiagnostic('SQLITE_BUSY: database is locked')).toBe('busy')
+    expect(classifyDatabaseDiagnostic('database disk image is malformed')).toBe('corrupt')
+  })
+  it('fails closed for unknown OpenCode versions before model use', () => {
+    expect(() => validateOpenCodeCompatibility('9.9.9', 'run --format json --agent plan --model --dir --file')).toThrow(/does not support/)
   })
 
   it('keeps debug diagnostics opt-in and separate from normal arguments', () => {

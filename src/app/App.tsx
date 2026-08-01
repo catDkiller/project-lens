@@ -40,6 +40,11 @@ export function App() {
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
   const [webResearchEnabled, setWebResearchEnabled] = useState(() => typeof localStorage === 'undefined' ? true : localStorage.getItem('project-lens-web-research') !== 'false')
+  const [apiToken, setApiToken] = useState<string>()
+  async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+    const headers = new Headers(init.headers); if (apiToken) headers.set('x-project-lens-token', apiToken)
+    return fetch(input, { ...init, headers })
+  }
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', appearance === 'dark')
@@ -56,7 +61,7 @@ export function App() {
   useEffect(() => {
     if (!runId) return
     const poll = async () => {
-      const response = await fetch(`/api/analysis/${runId}`)
+      const response = await apiFetch(`/api/analysis/${runId}`)
       if (!response.ok) { setRunStatus(undefined); setRunId(undefined); setError('The analysis session was interrupted because the local service restarted.'); setMode('failed'); return }
       const status = await response.json() as AnalysisRunStatusDto; setRunStatus(status)
     }
@@ -64,13 +69,17 @@ export function App() {
   }, [runId])
   async function loadRuntime() {
     try {
-      const agents = await fetch('/api/agents').then(async (response) => response.ok ? response.json() as Promise<AgentStatusDto[]> : Promise.reject())
+      const health = await fetch('/api/runtime/health').then((response) => response.json() as Promise<{ token?: string }>)
+      if (!health.token) throw new Error('Daemon token missing')
+      setApiToken(health.token)
+      const authHeaders = { 'x-project-lens-token': health.token }
+      const agents = await fetch('/api/agents', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<AgentStatusDto[]> : Promise.reject())
       const detected = agents[0]; setAgent(detected)
       if (!detected?.installed) { setRuntimeStatus(detected?.error ?? 'OpenCode is unavailable. Install and configure OpenCode, then restart Project Lens.'); return }
       setRuntimeStatus('Loading OpenCode models…')
-      const discovered = await fetch('/api/agents/opencode/models').then(async (response) => response.ok ? response.json() as Promise<ModelDto[]> : Promise.reject(await response.json()))
+      const discovered = await fetch('/api/agents/opencode/models', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<ModelDto[]> : Promise.reject(await response.json()))
       setModels(discovered)
-      const discoveredProviders = await fetch('/api/opencode/providers').then(async (response) => response.ok ? response.json() as Promise<ProviderDto[]> : Promise.resolve([]))
+      const discoveredProviders = await fetch('/api/opencode/providers', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<ProviderDto[]> : Promise.resolve([]))
       setProviders(discoveredProviders); setRuntimeStatus(discovered.length ? 'OpenCode detected' : 'No configured models. Configure a provider in OpenCode, then restart Project Lens.')
     } catch { setRuntimeStatus('Project Lens could not reach its local runtime. Run npm run dev and try again.') }
   }
@@ -92,9 +101,9 @@ export function App() {
     try {
       const endpoint = localProject ? '/api/analysis/local' : '/api/analysis/sample'
       const body = localProject ? { projectId: localProject.id, name: localProject.name, files: localProject.files, modelId, webResearchEnabled } : { agentId: 'opencode', modelId, webResearchEnabled }
-      const started = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (response) => response.ok ? response.json() as Promise<{ runId: string }> : Promise.reject(await response.json()))
+      const started = await apiFetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (response) => response.ok ? response.json() as Promise<{ runId: string }> : Promise.reject(await response.json()))
       setRunId(started.runId); setRunStatus(undefined); setCancelling(false)
-      const stream = new EventSource(`/api/analysis/${started.runId}/events`)
+      const stream = new EventSource(`/api/analysis/${started.runId}/events?token=${encodeURIComponent(apiToken ?? '')}`)
       for (const type of ['queued', 'preparing-evidence', 'starting-agent', 'analysing', 'validating', 'completed', 'failed', 'cancelled']) {
         stream.addEventListener(type, (message) => {
           const event = JSON.parse((message as MessageEvent).data) as AnalysisEventDto
@@ -105,7 +114,7 @@ export function App() {
           if (event.type === 'failed' || event.type === 'cancelled') { stream.close(); setRunId(undefined); setRunStatus(undefined); setCancelling(false); setError(event.error ?? (event.type === 'cancelled' ? 'Analysis was cancelled.' : 'Analysis failed.')); setMode('failed') }
         })
       }
-      stream.onerror = () => { stream.close(); void fetch(`/api/analysis/${started.runId}`).then(async (response) => { if (!response.ok) { setRunId(undefined); setRunStatus(undefined); setError('The analysis session was interrupted because the local service restarted.'); setMode('failed') } else setRunStatus(await response.json() as AnalysisRunStatusDto) }).catch(() => { setRunId(undefined); setRunStatus(undefined); setError('The analysis connection ended unexpectedly.'); setMode('failed') }) }
+      stream.onerror = () => { stream.close(); void apiFetch(`/api/analysis/${started.runId}`).then(async (response) => { if (!response.ok) { setRunId(undefined); setRunStatus(undefined); setError('The analysis session was interrupted because the local service restarted.'); setMode('failed') } else setRunStatus(await response.json() as AnalysisRunStatusDto) }).catch(() => { setRunId(undefined); setRunStatus(undefined); setError('The analysis connection ended unexpectedly.'); setMode('failed') }) }
     } catch (reason) { setRunId(undefined); setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'Analysis could not start.'); setMode('failed') }
   }
 
@@ -115,14 +124,14 @@ export function App() {
     setError(undefined); setAnalysisStage(undefined); setProjectNotice(summary); setMode('launcher')
   }
 
-  async function cancelAnalysis() { if (!runId || cancelling) return; setCancelling(true); await fetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
-  async function checkReadiness() { const response = await fetch('/api/opencode/readiness'); const result = await response.json() as { ready?: boolean; message?: string }; if (response.ok && result.ready) { setError(undefined); setRuntimeStatus('OpenCode readiness confirmed'); setMode('launcher') } else setError(result.message ?? 'OpenCode is still busy. Try again later.') }
-  async function refreshProviders() { const response = await fetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()); await refreshModels() }
-  async function refreshModels() { const response = await fetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
-  async function connectProvider(providerId: string) { const response = await fetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json() as ProviderAuthSessionDto & { error?: string }; if (response.ok) setAuthSession(result); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
-  async function checkConnection(id = authSession?.id) { if (!id) return; const response = await fetch(`/api/opencode/auth-sessions/${id}`); const session = await response.json() as ProviderAuthSessionDto; if (!response.ok) { setRuntimeStatus('Project Lens could not verify the OpenCode connection.'); return }; setAuthSession(session); setRuntimeStatus(session.message); if (session.status === 'connected') { await refreshProviders(); await refreshModels() } }
-  async function cancelConnection() { if (!authSession) return; const response = await fetch(`/api/opencode/auth-sessions/${authSession.id}`, { method: 'POST' }); if (response.ok) { const session = await response.json() as ProviderAuthSessionDto; setAuthSession(session); setRuntimeStatus(session.message) } }
-  async function disconnectProvider(providerId: string) { await fetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
+  async function cancelAnalysis() { if (!runId || cancelling) return; setCancelling(true); await apiFetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
+  async function checkReadiness() { const response = await apiFetch('/api/opencode/readiness'); const result = await response.json() as { ready?: boolean; message?: string }; if (response.ok && result.ready) { setError(undefined); setRuntimeStatus('OpenCode readiness confirmed'); setMode('launcher') } else setError(result.message ?? 'OpenCode is still busy. Try again later.') }
+  async function refreshProviders() { const response = await apiFetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()); await refreshModels() }
+  async function refreshModels() { const response = await apiFetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
+  async function connectProvider(providerId: string) { const response = await apiFetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json() as ProviderAuthSessionDto & { error?: string }; if (response.ok) setAuthSession(result); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
+  async function checkConnection(id = authSession?.id) { if (!id) return; const response = await apiFetch(`/api/opencode/auth-sessions/${id}`); const session = await response.json() as ProviderAuthSessionDto; if (!response.ok) { setRuntimeStatus('Project Lens could not verify the OpenCode connection.'); return }; setAuthSession(session); setRuntimeStatus(session.message); if (session.status === 'connected') { await refreshProviders(); await refreshModels() } }
+  async function cancelConnection() { if (!authSession) return; const response = await apiFetch(`/api/opencode/auth-sessions/${authSession.id}`, { method: 'POST' }); if (response.ok) { const session = await response.json() as ProviderAuthSessionDto; setAuthSession(session); setRuntimeStatus(session.message) } }
+  async function disconnectProvider(providerId: string) { await apiFetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
   if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} startedAt={analysisStartedAt} runState={runStatus?.state} lastAnyEventAt={runStatus?.lastAnyEventAt} lastGenuineAgentEventAt={runStatus?.lastGenuineAgentEventAt} cancelling={cancelling} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} onConnectOpenCode={() => void connectProvider('opencode')} onCheckReadiness={() => void checkReadiness()} />

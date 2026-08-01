@@ -12,13 +12,17 @@ import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto, ProviderAuthSessionDto, ProviderAuthState } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
-import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, probeOpenCodeReadiness, redact, resolveOpenCodeExecutable, runOpenCode, sanitizeResearchMetadata } from './opencode'
+import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, probeOpenCodeCompatibility, probeOpenCodeReadiness, redact, resolveOpenCodeExecutable, runOpenCode, sanitizeResearchMetadata } from './opencode'
+import { quarantineProjectControls } from './projectControls'
 
-type RunRecord = { runId: string; projectId: string; agentId: string; modelId: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; childProcessHandle?: ChildProcess; workspace?: string; requestFile?: string; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed' | 'interrupted'; events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }
+type RunRecord = { runId: string; projectId: string; agentId: string; modelId: string; openCodeVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; childProcessHandle?: ChildProcess; workspace?: string; requestFile?: string; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed' | 'interrupted'; events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }
 const runs = new Map<string, RunRecord>()
 const authSessions = new Map<string, ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean }>()
 const completedCache = new Map<string, PresentationKnowledgeBase>()
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
+export const daemonToken = process.env.PROJECT_LENS_API_TOKEN ?? randomUUID()
+const allowedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173', 'http://[::1]:5173'])
+export function isAllowedDaemonRequest(origin: string | undefined, token: string | undefined) { return (!origin || allowedOrigins.has(origin)) && token === daemonToken }
 
 function send(res: import('node:http').ServerResponse, status: number, body: unknown) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 function event(runId: string, next: AnalysisEventDto, genuine = false) {
@@ -93,21 +97,26 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
   const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, active.source ? 'Local folder' : 'Sample')
   const executable = resolveOpenCodeExecutable(); if (!executable) throw new OpenCodeFailureError('process-startup-failure', 'OpenCode is unavailable.')
   if (!isSafeAnalysisConfig()) throw new OpenCodeFailureError('permission-or-configuration-failure', 'OpenCode runtime safety could not be confirmed. Analysis was not started.')
-  event(runId, { type: 'preparing-evidence', message: 'Checking OpenCode local readiness before any model request.' }); const readiness = await probeOpenCodeReadiness(executable, active.controller.signal, undefined, (attempt, delay) => event(runId, { type: 'preparing-evidence', message: `OpenCode database is busy; checking again in ${delay / 1_000}s (attempt ${attempt + 1}).` })); event(runId, { type: 'preparing-evidence', message: `OpenCode readiness confirmed in ${readiness.elapsedMs}ms.` }); const availableModels = applyProviderAvailability(readiness.models, readiness.providers)
+  const compatibility = await probeOpenCodeCompatibility(executable, active.controller.signal); active.openCodeVersion = compatibility.version; event(runId, { type: 'preparing-evidence', message: `OpenCode ${compatibility.version} compatibility confirmed.` }); event(runId, { type: 'preparing-evidence', message: 'Checking OpenCode local readiness before any model request.' }); const readiness = await probeOpenCodeReadiness(executable, active.controller.signal, undefined, (attempt, delay) => event(runId, { type: 'preparing-evidence', message: `OpenCode database is busy; checking again in ${delay / 1_000}s (attempt ${attempt + 1}).` })); event(runId, { type: 'preparing-evidence', message: `OpenCode readiness confirmed in ${readiness.elapsedMs}ms.` }); const availableModels = applyProviderAvailability(readiness.models, readiness.providers)
   const selectedModel = availableModels.find((model) => model.fullId === modelId)
   if (!selectedModel) throw new OpenCodeFailureError('model-unavailable', 'The selected model is not in the current OpenCode catalogue.')
   if (selectedModel.availability === 'requires-provider' || selectedModel.runnable === false) throw new OpenCodeFailureError('provider-authentication-required', 'Connect OpenCode to use this model.')
   if (!canStartOpenCodeAnalysis(selectedModel)) throw new OpenCodeFailureError('permission-or-configuration-failure', 'Provider readiness could not be confirmed. Analysis was not started.')
   const workspace = active.source ? await createProjectAnalysisWorkspace(project.files) : await createAnalysisWorkspace(sampleRoot); active.workspace = workspace.directory
   const requestDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-request-'))
+  const runtimeConfigDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-opencode-config-'))
   try {
+    const quarantinedControls = await quarantineProjectControls(workspace.directory, requestDirectory)
+    await writeFile(path.join(runtimeConfigDirectory, 'opencode.json'), analysisEnvironment({}, webResearchEnabled).OPENCODE_CONFIG_CONTENT ?? '{}', 'utf8')
     setRunState(active, 'spawning-agent'); event(runId, { type: 'starting-agent', message: 'Starting OpenCode in the disposable workspace.' })
     const requestFile = path.join(requestDirectory, '.project-lens-request.json')
-    await writeFile(requestFile, buildProjectRequestFile(raw, webResearchEnabled), 'utf8'); active.requestFile = requestFile; event(runId, { type: 'preparing-evidence', message: 'Created the bounded Project Lens request file.' })
+    await writeFile(requestFile, buildProjectRequestFile(raw, webResearchEnabled, quarantinedControls), 'utf8'); active.requestFile = requestFile; event(runId, { type: 'preparing-evidence', message: 'Created the bounded Project Lens request file.' })
     let integrityBaseline = await fileManifest(workspace.directory)
-    const args = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...buildAnalysisArgs(modelId, workspace.directory, requestFile, variant)]
+    const baseArgs = buildAnalysisArgs(modelId, workspace.directory, requestFile, variant)
+    if (compatibility.supportsPure) baseArgs.splice(1, 0, '--pure')
+    const args = [...openCodeDiagnosticArgs(process.env.PROJECT_LENS_OPENCODE_DIAGNOSTICS === '1'), ...baseArgs]
     let webResearchOutcome: 'not-requested' | 'configured' | 'used-successfully' | 'attempted-but-unavailable' | 'failed' = webResearchEnabled ? 'configured' : 'not-requested'
-    const options = { cwd: workspace.directory, env: analysisEnvironment(process.env, webResearchEnabled), signal: active.controller.signal,
+    const options = { cwd: workspace.directory, env: analysisEnvironment(process.env, webResearchEnabled, runtimeConfigDirectory), signal: active.controller.signal,
       onProcessHandle: (child: ChildProcess) => { active.childProcessHandle = child },
       onProcessStarted: (pid: number) => { active.childPid = pid; setRunState(active, 'agent-process-running'); event(runId, { type: 'starting-agent', message: `OpenCode process started (PID ${pid}).` }); setRunState(active, 'waiting-for-provider'); event(runId, { type: 'analysing', message: 'OpenCode is running. Waiting for the selected model to respond…' }) },
       onProcessError: (error: Error) => event(runId, { type: 'failed', error: 'OpenCode could not start locally.', message: `OpenCode process error: ${redact(error.message)}`, diagnostic: { code: 'process-startup-failure', modelId } }),
@@ -161,12 +170,15 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
     const validPresentation = presentation as PresentationKnowledgeBase
     completedCache.set(key, validPresentation)
     active.terminalOutcome = 'completed'; setRunState(active, 'completed'); event(runId, { type: 'completed', result: validPresentation, diagnostic: { webResearchOutcome } })
-  } finally { active.workspace = undefined; active.requestFile = undefined; await removeAnalysisWorkspace(workspace.directory, active.source ? (workspace as { source?: string }).source : undefined); await rm(requestDirectory, { recursive: true, force: true, maxRetries: 3 }) }
+  } finally { active.workspace = undefined; active.requestFile = undefined; await removeAnalysisWorkspace(workspace.directory, active.source ? (workspace as { source?: string }).source : undefined); await rm(requestDirectory, { recursive: true, force: true, maxRetries: 3 }); await rm(runtimeConfigDirectory, { recursive: true, force: true, maxRetries: 3 }) }
 }
 
 export const daemon = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-  if (req.method === 'GET' && url.pathname === '/api/runtime/health') return send(res, 200, { status: 'ready', version: '0.1.0' })
+  if (req.method === 'GET' && url.pathname === '/api/runtime/health') return send(res, 200, { status: 'ready', version: '0.1.0', token: daemonToken })
+  const origin = req.headers.origin
+  if (origin && !allowedOrigins.has(origin)) return send(res, 403, { error: 'origin-not-allowed' })
+  if (!isAllowedDaemonRequest(origin, req.headers['x-project-lens-token'] as string | undefined) && url.searchParams.get('token') !== daemonToken) return send(res, 401, { error: 'invalid-daemon-token' })
   if (req.method === 'GET' && url.pathname === '/api/opencode/readiness') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: 'process-startup-failure', message: detected.error }); try { const readiness = await probeOpenCodeReadiness(detected.executablePath); return send(res, 200, { ready: true, attempts: readiness.attempts, elapsedMs: readiness.elapsedMs }) } catch (error) { const code = classifyOpenCodeFailure(error); return send(res, 409, { ready: false, error: code, message: openCodeFailureMessage(code) }) } }
   if (req.method === 'GET' && url.pathname === '/api/agents') return send(res, 200, [await detectOpenCode()])
   if (req.method === 'GET' && url.pathname === '/api/agents/opencode/models') { const detected = await detectOpenCode(); if (!detected.installed || !detected.executablePath) return send(res, 503, { error: detected.error }); try { const providers = await discoverProviders(detected.executablePath); return send(res, 200, applyProviderAvailability(await discoverModels(detected.executablePath), providers)) } catch (error) { return send(res, 502, { error: error instanceof Error ? error.message : 'Model discovery failed.' }) } }
