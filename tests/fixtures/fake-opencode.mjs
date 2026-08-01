@@ -61,6 +61,7 @@ async function verifyRun(commandArgs) {
   if (!request.deterministicProjectEvidence) exitError('Request file evidence missing.')
   if (mode === 'mutation-attempt') await writeFile(path.join(dir, 'fake-opencode-mutated.txt'), 'mutated', 'utf8')
   if (mode === 'provider-error') exitError('429 rate limit reached')
+  if (mode === 'structured-error') { process.stdout.write('{"type":"error","error":{"name":"APIError","data":{"message":"User not found","statusCode":401,"isRetryable":false,"providerID":"openrouter"}}}'); process.exit(1) }
   if (mode === 'hang' || mode === 'cancellation') await new Promise(() => {})
   if (mode === 'delayed-first-response') await new Promise((resolve) => setTimeout(resolve, 40))
   if (mode === 'exit-without-output') return

@@ -156,6 +156,19 @@ describe('OpenCode process harness', () => {
     await removeAnalysisWorkspace(harness.workspace.directory, harness.workspace.source)
   })
 
+  it('flushes a final structured error event before classifying process exit', async () => {
+    const harness = await buildHarness()
+    const events: Record<string, unknown>[] = []
+    await expect(runOpenCode(fakeExecutable, [fakeScript, ...buildAnalysisArgs('opencode/deepseek-v4-flash-free', harness.workspace.directory, harness.requestFile)], '', {
+      cwd: harness.workspace.directory,
+      env: { ...analysisEnvironment(process.env, true), PROJECT_LENS_FAKE_MODE: 'structured-error', PROJECT_LENS_FAKE_MODELS: 'opencode/deepseek-v4-flash-free', PROJECT_LENS_EXPECT_CWD: harness.workspace.directory },
+      onStdoutEvent: (event) => events.push(event), firstResponseTimeoutMs: 500, inactivityTimeoutMs: 500, totalRunTimeoutMs: 1_000, processStartTimeoutMs: 500,
+    })).rejects.toMatchObject({ code: 'provider-authentication-failed', structured: { statusCode: 401 } })
+    expect(events).toHaveLength(1)
+    await rm(harness.requestDirectory, { recursive: true, force: true, maxRetries: 3 })
+    await removeAnalysisWorkspace(harness.workspace.directory, harness.workspace.source)
+  })
+
   it('classifies transient and persistent database locks before a run request', async () => {
     const state = await mkdtemp(path.join(tmpdir(), 'project-lens-lock-'))
     cleanupDirs.push(state)

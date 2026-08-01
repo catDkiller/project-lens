@@ -16,7 +16,7 @@ import { localProject, prepareLocalFiles } from '../project-sources/localFolderI
 import { analysisEnvironment, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyOpenCodeFailure, detectOpenCode, discoverModels, discoverProviders, extractOpenCodeText, freeModelIds, isSafeAnalysisConfig, launchOpenCodeAuth, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, probeOpenCodeCompatibility, probeOpenCodeReadiness, redact, resolveOpenCodeExecutable, runOpenCode, sanitizeResearchMetadata } from './opencode'
 import { quarantineProjectControls } from './projectControls'
 
-type RunRecord = { runId: string; projectId: string; agentId: string; modelId: string; openCodeVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; childProcessHandle?: ChildProcess; workspace?: string; requestFile?: string; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed' | 'interrupted'; events: AnalysisEventDto[]; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }
+type RunRecord = { runId: string; projectId: string; agentId: string; modelId: string; openCodeVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; childProcessHandle?: ChildProcess; workspace?: string; requestFile?: string; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed' | 'interrupted'; events: AnalysisEventDto[]; diagnosticSummary: NonNullable<AnalysisRunStatusDto['diagnosticSummary']>; controller: AbortController; project?: Awaited<ReturnType<typeof sampleProject>>; source?: string }
 const runs = new Map<string, RunRecord>()
 const authSessions = new Map<string, ProviderAuthSessionDto & { processId?: number; terminalClosed?: boolean }>()
 const completedCache = new Map<string, PresentationKnowledgeBase>()
@@ -36,7 +36,7 @@ function statusOf(run: RunRecord): AnalysisRunStatusDto { const { controller: _c
 function activeRun() { return [...runs.values()].find((run) => !run.terminalOutcome) }
 function createRun(runId: string, projectId: string, modelId: string, events: AnalysisEventDto[], extra: Partial<RunRecord> = {}): RunRecord {
   const now = new Date().toISOString()
-  return { runId, projectId, agentId: 'opencode', modelId, state: 'queued', createdAt: now, cancellationRequested: false, events, controller: new AbortController(), ...extra }
+  return { runId, projectId, agentId: 'opencode', modelId, state: 'queued', createdAt: now, cancellationRequested: false, events, diagnosticSummary: { eventTypes: [], stdoutBytes: 0, stderrBytes: 0, providerRequestBegan: false, textOutputReceived: false }, controller: new AbortController(), ...extra }
 }
 function analysisFailure(runId: string, modelId: string, error: unknown): AnalysisEventDto {
   const last = runs.get(runId)?.events.at(-1)
@@ -47,7 +47,8 @@ function analysisFailure(runId: string, modelId: string, error: unknown): Analys
   if (error instanceof Error && error.message.includes('cancelled')) return { type: 'cancelled', error: 'Analysis was cancelled.' }
   const code = classifyOpenCodeFailure(error)
   const message = code === 'opencode-database-busy' ? 'OpenCode startup was attempted, but its local database was locked. No model response was requested or received.' : error instanceof Error ? redact(error.message) : 'Analysis failed.'
-  return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message, diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp } }
+  const structured = error instanceof OpenCodeFailureError ? error.structured : undefined
+  return { type: 'failed', error: code === 'provider-authentication-required' ? 'OpenCode is not connected' : openCodeFailureMessage(code), message, diagnostic: { code, stderr: error instanceof Error ? redact(error.message) : undefined, modelId, lastActivity: last?.timestamp, structuredErrorName: structured?.name, statusCode: structured?.statusCode, providerId: structured?.providerID, retryable: structured?.retryable } }
 }
 function recordFailure(runId: string, modelId: string, error: unknown) {
   const run = runs.get(runId); if (!run || run.terminalOutcome) return
@@ -122,7 +123,12 @@ async function runAnalysis(runId: string, modelId: string, variant?: string, web
       onProcessStarted: (pid: number) => { active.childPid = pid; setRunState(active, 'agent-process-running'); event(runId, { type: 'starting-agent', message: `OpenCode process started (PID ${pid}).` }); setRunState(active, 'waiting-for-provider'); event(runId, { type: 'analysing', message: 'OpenCode is running. Waiting for the selected model to respond…' }) },
       onProcessError: (error: Error) => event(runId, { type: 'failed', error: 'OpenCode could not start locally.', message: `OpenCode process error: ${redact(error.message)}`, diagnostic: { code: 'process-startup-failure', modelId } }),
       onProcessExited: (code: number | null) => { active.childPid = undefined; active.childProcessHandle = undefined; event(runId, { type: 'analysing', message: `OpenCode process exited${code === null ? '' : ` with code ${code}`}.` }) },
+      onOutputBytes: (stdoutBytes: number, stderrBytes: number) => { active.diagnosticSummary.stdoutBytes = Math.min(stdoutBytes, 1_000_000); active.diagnosticSummary.stderrBytes = Math.min(stderrBytes, 100_000) },
+      onStructuredError: (failure: OpenCodeFailureError) => { active.diagnosticSummary.structuredErrorName = failure.structured?.name; active.diagnosticSummary.statusCode = failure.structured?.statusCode },
       onStdoutEvent: (parsed: Record<string, unknown>) => {
+      active.diagnosticSummary.providerRequestBegan = true
+      if (typeof parsed.type === 'string' && active.diagnosticSummary.eventTypes.length < 32) active.diagnosticSummary.eventTypes.push(parsed.type)
+      if (parsed.type === 'error' || parsed.type === 'text') active.diagnosticSummary.textOutputReceived = parsed.type === 'text'
       setRunState(active, 'receiving-agent-events')
       event(runId, { type: 'analysing', message: 'OpenCode emitted a structured event.' }, true)
       if (parsed.type === 'web-research') {

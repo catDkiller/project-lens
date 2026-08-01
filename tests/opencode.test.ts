@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyDatabaseDiagnostic, classifyModelCost, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, inspectOpenCodeDatabase, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl, validateOpenCodeCompatibility } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyDatabaseDiagnostic, classifyModelCost, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, inspectOpenCodeDatabase, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, parseOpenCodeStructuredError, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl, validateOpenCodeCompatibility } from '../src/local-api/opencode'
 import { createOpenCodeAgent } from '../src/agents'
 import { createProjectKnowledgeBase } from '../src/knowledge'
 import { runProjectAnalysis } from '../src/analysis'
@@ -82,6 +82,20 @@ describe('OpenCode local adapter', () => {
     expect(classifyOpenCodeFailure(new Error('OpenCode did not return structured JSON.'))).toBe('parser-failure')
     expect(classifyOpenCodeFailure(new Error('ECONNREFUSED provider'))).toBe('network-or-provider-failure')
     expect(openCodeFailureMessage('provider-authentication-required')).toContain('authenticated OpenCode provider')
+  })
+
+  it('preserves nested OpenCode 1.18.5 error details over a generic exit', () => {
+    const error = parseOpenCodeStructuredError({ type: 'error', error: { name: 'APIError', data: { message: 'insufficient credit token=secret', statusCode: 402, isRetryable: false, providerID: 'openrouter' } } })
+    expect(error).toMatchObject({ code: 'provider-billing-required', message: 'insufficient credit token=[redacted]', structured: { name: 'APIError', statusCode: 402, providerID: 'openrouter', retryable: false } })
+    expect(classifyOpenCodeFailure(error)).toBe('provider-billing-required')
+  })
+
+  it('maps typed OpenCode errors safely and tolerates malformed events', () => {
+    expect(parseOpenCodeStructuredError({ type: 'error', error: { name: 'ProviderAuthError', data: { message: 'Denied' } } })?.code).toBe('provider-authentication-required')
+    expect(parseOpenCodeStructuredError({ type: 'error', error: { name: 'APIError', data: { message: 'Not found', statusCode: 404 } } })?.code).toBe('model-unavailable')
+    expect(parseOpenCodeStructuredError({ type: 'error', error: { name: 'MessageOutputLengthError', data: {} } })?.code).toBe('model-output-too-long')
+    expect(parseOpenCodeStructuredError({ type: 'text', text: 'partial' })).toBeUndefined()
+    expect(parseOpenCodeStructuredError({ type: 'error', error: 'bad' })).toMatchObject({ code: 'provider-error' })
   })
 
   it('parses ANSI OpenCode auth output without exposing credentials', () => {

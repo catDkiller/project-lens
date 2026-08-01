@@ -11,18 +11,40 @@ import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelCost,
 export interface OpenCodeExecutable { path: string; version: string }
 export interface OpenCodeRunResult { stdout: string; stderr: string; code: number | null }
 export type OpenCodeTimeoutType = 'process-start' | 'provider-first-response' | 'inactivity' | 'total-run'
-export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number; onStdoutEvent?: (event: Record<string, unknown>) => void; onProcessHandle?: (child: ChildProcess) => void; onProcessStarted?: (pid: number) => void; onProcessExited?: (code: number | null) => void; onProcessError?: (error: Error) => void }
+export interface OpenCodeRunOptions { cwd?: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs?: number; timeoutType?: OpenCodeTimeoutType; processStartTimeoutMs?: number; firstResponseTimeoutMs?: number; inactivityTimeoutMs?: number; totalRunTimeoutMs?: number; onStdoutEvent?: (event: Record<string, unknown>) => void; onStructuredError?: (error: OpenCodeFailureError) => void; onOutputBytes?: (stdoutBytes: number, stderrBytes: number) => void; onProcessHandle?: (child: ChildProcess) => void; onProcessStarted?: (pid: number) => void; onProcessExited?: (code: number | null) => void; onProcessError?: (error: Error) => void }
 export const OPEN_CODE_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 4 * 60_000, inactivityMs: 2 * 60_000, totalRunMs: 10 * 60_000 } as const
 export const PROJECT_LENS_REQUEST_SCHEMA_MARKER = 'project-lens-request-v1'
 export const OPEN_CODE_RUN_PROMPT = 'Read the attached Project Lens request, inspect the approved project when needed, and return only the required structured JSON.'
 export class OpenCodeTimeoutError extends Error { readonly timeoutType: OpenCodeTimeoutType; constructor(timeoutType: OpenCodeTimeoutType) { super(`OpenCode timed out (${timeoutType}).`); this.timeoutType = timeoutType; this.name = 'OpenCodeTimeoutError' } }
 export class OpenCodeFailureError extends Error {
   readonly code: AnalysisFailureCode
-  constructor(code: AnalysisFailureCode, message: string) { super(message); this.code = code; this.name = 'OpenCodeFailureError' }
+  readonly structured?: { name?: string; statusCode?: number; providerID?: string; retryable?: boolean }
+  constructor(code: AnalysisFailureCode, message: string, structured?: { name?: string; statusCode?: number; providerID?: string; retryable?: boolean }) { super(message); this.code = code; this.structured = structured; this.name = 'OpenCodeFailureError' }
 }
 export function stripTerminalControl(value: string) {
   // eslint-disable-next-line no-control-regex
   return value.replace(/\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g, '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+}
+
+export function parseOpenCodeStructuredError(event: Record<string, unknown>) {
+  if (event.type !== 'error') return undefined
+  const error = event.error && typeof event.error === 'object' ? event.error as Record<string, unknown> : {}
+  const data = error.data && typeof error.data === 'object' ? error.data as Record<string, unknown> : {}
+  const name = typeof error.name === 'string' ? error.name : undefined
+  const message = redact(typeof data.message === 'string' ? data.message : typeof error.message === 'string' ? error.message : 'OpenCode reported an error.')
+  const statusCode = typeof data.statusCode === 'number' ? data.statusCode : undefined
+  const retryable = typeof data.isRetryable === 'boolean' ? data.isRetryable : undefined
+  const providerID = typeof data.providerID === 'string' ? data.providerID : undefined
+  const typed = name === 'ProviderAuthError' ? 'provider-authentication-required'
+    : statusCode === 401 || statusCode === 403 ? 'provider-authentication-failed'
+      : statusCode === 402 || /insufficient[- ]credit|insufficient funds/i.test(message) ? 'provider-billing-required'
+        : statusCode === 404 || /model[- ]not[- ]found|unknown model/i.test(message) ? 'model-unavailable'
+          : statusCode === 429 || /rate[- ]limit/i.test(message) ? 'provider-rate-limited'
+            : name === 'MessageOutputLengthError' ? 'model-output-too-long'
+              : name === 'MessageAbortedError' ? 'analysis-aborted'
+                : retryable || statusCode && statusCode >= 500 ? 'provider-temporarily-unavailable'
+                  : 'provider-error'
+  return new OpenCodeFailureError(typed, message, { name, statusCode, providerID, retryable })
 }
 export class OpenCodeDatabaseBusyError extends OpenCodeFailureError { constructor(message: string) { super('opencode-database-busy', message); this.name = 'OpenCodeDatabaseBusyError' } }
 
@@ -133,14 +155,14 @@ function runOpenCodeUncoordinated(executable: string, args: string[], input = ''
     const failAfter = (milliseconds: number | undefined, type: OpenCodeTimeoutType) => { if (milliseconds) timers.push(setTimeout(() => { timeout = type; terminate() }, milliseconds)) }
     const restartInactivity = () => { const index = timers.findIndex((timer) => timer === inactivityTimer); if (index >= 0) { clearTimeout(timers[index]); timers.splice(index, 1) }; inactivityTimer = setTimeout(() => { timeout = 'inactivity'; terminate() }, options.inactivityTimeoutMs ?? OPEN_CODE_TIMEOUTS.inactivityMs); timers.push(inactivityTimer) }
     let inactivityTimer: NodeJS.Timeout
-    const processEventLine = (line: string) => { const clean = stripTerminalControl(line); if (!clean.trim()) return; try { const parsed = JSON.parse(clean) as Record<string, unknown>; if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') }; restartInactivity(); options.onStdoutEvent?.(parsed) } catch { /* Ignore non-JSON stdout; stderr is the diagnostic channel. */ } }
+    const processEventLine = (line: string) => { const clean = stripTerminalControl(line); if (!clean.trim()) return; try { const parsed = JSON.parse(clean) as Record<string, unknown>; if (!receivedOutput) { receivedOutput = true; stopTimers(); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') }; restartInactivity(); const structured = parseOpenCodeStructuredError(parsed); if (structured && !runtimeFailure) { runtimeFailure = structured; options.onStructuredError?.(structured) }; options.onStdoutEvent?.(parsed) } catch { /* Ignore non-JSON stdout; stderr is the diagnostic channel. */ } }
     failAfter(options.processStartTimeoutMs ?? OPEN_CODE_TIMEOUTS.processStartMs, 'process-start')
     failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run')
     child.once('spawn', () => { stopTimers(); if (child.pid) options.onProcessStarted?.(child.pid); failAfter(options.firstResponseTimeoutMs ?? OPEN_CODE_TIMEOUTS.firstResponseMs, 'provider-first-response'); failAfter(options.totalRunTimeoutMs ?? options.timeoutMs ?? OPEN_CODE_TIMEOUTS.totalRunMs, options.timeoutType ?? 'total-run') })
     const abort = () => terminate()
     signal?.addEventListener('abort', abort, { once: true })
-    child.stdout.on('data', (data: Buffer) => { const text = data.toString(); stdout += text; eventBuffer += text; const lines = eventBuffer.split(/\r?\n/); eventBuffer = lines.pop() ?? ''; lines.forEach(processEventLine); if (stdout.length > 1_000_000) terminate() })
-    child.stderr.on('data', (data: Buffer) => { stderr = stripTerminalControl(stderr + data.toString()); if (/quota|rate[ -]?limit|\b429\b/i.test(stderr) && !runtimeFailure) { runtimeFailure = new OpenCodeFailureError('free-quota-or-rate-limit', redact(stderr)); terminate() }; if (stderr.length > 100_000) terminate() })
+    child.stdout.on('data', (data: Buffer) => { const text = data.toString(); stdout += text; options.onOutputBytes?.(Buffer.byteLength(stdout), Buffer.byteLength(stderr)); eventBuffer += text; const lines = eventBuffer.split(/\r?\n/); eventBuffer = lines.pop() ?? ''; lines.forEach(processEventLine); if (stdout.length > 1_000_000) terminate() })
+    child.stderr.on('data', (data: Buffer) => { stderr = stripTerminalControl(stderr + data.toString()); options.onOutputBytes?.(Buffer.byteLength(stdout), Buffer.byteLength(stderr)); if (/quota|rate[ -]?limit|\b429\b/i.test(stderr) && !runtimeFailure) { runtimeFailure = new OpenCodeFailureError('free-quota-or-rate-limit', redact(stderr)); terminate() }; if (stderr.length > 100_000) terminate() })
     child.once('error', (error) => { stopTimers(); options.onProcessError?.(error); reject(error) })
     child.once('close', (code) => { if (eventBuffer.trim()) processEventLine(eventBuffer); stopTimers(); signal?.removeEventListener('abort', abort); options.onProcessExited?.(code); if (runtimeFailure) return reject(runtimeFailure); if (timeout) return reject(new OpenCodeTimeoutError(timeout)); if (signal?.aborted) return reject(new Error('OpenCode analysis was cancelled.')); if (code !== 0 && !receivedOutput && /(?:database|sqlite).*(?:locked|busy)|(?:locked|busy).*(?:database|sqlite)|SQLITE_BUSY/i.test(stderr)) return reject(new OpenCodeDatabaseBusyError(redact(stderr))); resolve({ stdout: stripTerminalControl(stdout), stderr: stripTerminalControl(stderr), code }) })
     child.stdin.end(input)
@@ -310,6 +332,13 @@ export function classifyOpenCodeFailure(error: unknown): AnalysisFailureCode {
 export function openCodeFailureMessage(code: AnalysisFailureCode) {
   const messages: Record<AnalysisFailureCode, string> = {
     'provider-authentication-required': 'This model is provided through OpenCode and needs an authenticated OpenCode provider before it can run.',
+    'provider-authentication-failed': 'The connected provider rejected authentication. Reconnect it in OpenCode, then try again.',
+    'provider-billing-required': 'The selected provider requires available credit before it can run.',
+    'provider-rate-limited': 'The selected provider is rate limited. Wait, then try again.',
+    'provider-temporarily-unavailable': 'The selected provider is temporarily unavailable. Try again later.',
+    'provider-error': 'The selected provider returned an error. Check its connection and try again.',
+    'model-output-too-long': 'The model response exceeded the allowed output length. Narrow the request and try again.',
+    'analysis-aborted': 'The analysis was aborted before it completed.',
     'free-quota-or-rate-limit': 'The selected provider reported a quota or rate-limit problem. Wait and try again, or choose another ready model.',
     'model-unavailable': 'The selected model is no longer available from its provider. Refresh models and choose another one.',
     'network-or-provider-failure': 'OpenCode could not reach the selected provider. Check the provider connection and try again.',
