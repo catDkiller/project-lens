@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyDatabaseDiagnostic, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, inspectOpenCodeDatabase, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl, validateOpenCodeCompatibility } from '../src/local-api/opencode'
+import { analysisEnvironment, analysisPermissionConfig, applyProviderAvailability, buildAnalysisArgs, buildAnalysisCacheBasis, buildAnalysisCacheKey, buildProjectRequestFile, canStartOpenCodeAnalysis, classifyDatabaseDiagnostic, classifyModelCost, classifyOpenCodeFailure, extractOpenCodeText, freeModelIds, inspectOpenCodeDatabase, isSafeAnalysisConfig, mapOpenCodeModels, mapOpenCodeProviders, OPEN_CODE_RUN_PROMPT, OPEN_CODE_TIMEOUTS, openCodeDiagnosticArgs, openCodeFailureMessage, OpenCodeFailureError, OpenCodeTimeoutError, parseOpenCodeEvents, redact, resolveOpenCodeExecutable, sanitizeResearchMetadata, stripTerminalControl, validateOpenCodeCompatibility } from '../src/local-api/opencode'
 import { createOpenCodeAgent } from '../src/agents'
 import { createProjectKnowledgeBase } from '../src/knowledge'
 import { runProjectAnalysis } from '../src/analysis'
@@ -11,8 +11,8 @@ import { preparedViteSample } from '../src/fixtures/preparedViteSample'
 describe('OpenCode local adapter', () => {
   it('does not hardcode models and maps OpenCode output', () => {
     expect(mapOpenCodeModels('provider-a/fast\nprovider-b/careful\nprovider-a/fast\n')).toEqual([
-      { providerId: 'provider-a', modelId: 'fast', fullId: 'provider-a/fast', displayName: 'fast', availability: 'available', free: false, local: false },
-      { providerId: 'provider-b', modelId: 'careful', fullId: 'provider-b/careful', displayName: 'careful', availability: 'available', free: false, local: false },
+      { providerId: 'provider-a', modelId: 'fast', fullId: 'provider-a/fast', displayName: 'fast', availability: 'available', cost: 'usage-priced', free: false, local: false },
+      { providerId: 'provider-b', modelId: 'careful', fullId: 'provider-b/careful', displayName: 'careful', availability: 'available', cost: 'usage-priced', free: false, local: false },
     ])
   })
 
@@ -36,6 +36,13 @@ describe('OpenCode local adapter', () => {
 
   it('lists only IDs explicitly marked free', () => {
     expect(freeModelIds(mapOpenCodeModels('provider/free:free\nprovider/unknown\n'))).toEqual(['provider/free:free'])
+  })
+
+  it('classifies cost from the exact suffix without guessing from names', () => {
+    expect(classifyModelCost('openrouter/deepseek/deepseek-v4-flash:free')).toBe('explicit-free')
+    expect(classifyModelCost('provider/free-model')).toBe('usage-priced')
+    expect(classifyModelCost('provider/model', 'unknown')).toBe('unknown')
+    expect(mapOpenCodeModels('provider/free-model\nprovider/model:free')[0].cost).toBe('usage-priced')
   })
 
   it('separates catalogue entries from provider-confirmed runnable models', () => {

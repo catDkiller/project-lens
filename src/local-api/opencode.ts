@@ -6,7 +6,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { PROJECT_EXPLANATION_PROMPT_VERSION, PROJECT_EXPLANATION_SYSTEM_PROMPT } from '../knowledge'
 import type { ProjectKnowledgeBase } from '../knowledge'
-import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelDto, ProviderDto } from './contracts'
+import type { AgentStatusDto, AnalysisFailureCode, ModelAvailability, ModelCost, ModelDto, ProviderDto } from './contracts'
 
 export interface OpenCodeExecutable { path: string; version: string }
 export interface OpenCodeRunResult { stdout: string; stderr: string; code: number | null }
@@ -262,8 +262,13 @@ export function mapOpenCodeModels(output: string): ModelDto[] {
   return [...new Set(output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))].map((fullId) => {
     const [providerId, ...rest] = fullId.split('/')
     const modelId = rest.join('/')
-    return { providerId, modelId, fullId, displayName: modelId || fullId, availability: 'available', free: fullId.includes(':free'), local: /^(ollama|lmstudio|local)(\/|$)/i.test(providerId) }
+    const explicitlyFree = fullId.endsWith(':free')
+    return { providerId, modelId, fullId, displayName: modelId || fullId, availability: 'available', cost: classifyModelCost(fullId), free: explicitlyFree, local: /^(ollama|lmstudio|local)(\/|$)/i.test(providerId) }
   })
+}
+
+export function classifyModelCost(fullId: string, pricing: 'usage-priced' | 'unknown' = 'usage-priced'): ModelCost {
+  return fullId.endsWith(':free') ? 'explicit-free' : pricing
 }
 
 /** Catalogue output is not proof that a model can run. Enrich it only after auth discovery. */
@@ -275,7 +280,8 @@ export function applyProviderAvailability(models: ModelDto[], providers: Provide
     const availability: ModelAvailability = isConnected === true ? 'ready' : isConnected === false ? 'requires-provider' : 'unknown'
     const readiness: ModelDto['readiness'] = isConnected === true ? 'ready' : isConnected === false ? 'setup-required' : 'unknown'
     const reason = isConnected === true ? undefined : isConnected === false ? 'Connect this provider in OpenCode first.' : 'Provider availability could not be confirmed.'
-    return { ...model, availability, readiness, catalogued: true, providerConnected: isConnected === true, connected: isConnected === true, runnable: isConnected === true, explicitlyFree: model.free === true, readinessReason: reason, availabilityReason: reason, lastCheckedAt: checkedAt }
+    const cost = model.cost ?? classifyModelCost(model.fullId)
+    return { ...model, availability, cost, readiness, catalogued: true, providerConnected: isConnected === true, connected: isConnected === true, runnable: isConnected === true, explicitlyFree: cost === 'explicit-free', free: cost === 'explicit-free', readinessReason: reason, availabilityReason: reason, lastCheckedAt: checkedAt }
   })
 }
 

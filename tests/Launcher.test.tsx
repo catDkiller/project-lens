@@ -29,4 +29,14 @@ describe('launcher local import and model selector', () => {
     expect(source).toContain('setOpen(false)')
     expect(source).toContain('Connect ${provider.displayName}')
   })
+
+  it('groups cost classes and confirms non-free models by exact ID', async () => {
+    const source = await readFile(new URL('../src/app/Launcher.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('Ready · Free')
+    expect(source).toContain('Ready · May incur charges')
+    expect(source).toContain('This model may incur charges through your connected provider.')
+    expect(source).toContain('confirmedCostModelId !== selected.fullId')
+    expect(source).toContain('pendingCostModel.fullId')
+    expect(source).toContain('Choose a free model')
+  })
 })
