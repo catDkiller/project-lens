@@ -7,7 +7,7 @@ export const CODEX_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 240_000
 
 export interface CodexProbe { executable: string; version: string; signedIn: boolean; supportsModelOverride: boolean }
 export interface CodexRunResult { code: number | null; stdout: string; stderr: string; events: Record<string, unknown>[]; completed: boolean }
-export interface CodexRunOptions { cwd: string; input: string; model?: string; signal?: AbortSignal; onProcess?: (child: ChildProcess) => void; onEvent?: (event: Record<string, unknown>) => void }
+export interface CodexRunOptions { cwd: string; input: string; model?: string; schemaPath: string; outputPath: string; signal?: AbortSignal; onProcess?: (child: ChildProcess) => void; onEvent?: (event: Record<string, unknown>) => void }
 
 function candidates() {
   const names = process.platform === 'win32' ? ['codex.exe', 'codex.cmd', 'codex'] : ['codex']
@@ -50,14 +50,7 @@ export async function detectCodex(): Promise<CodexProbe | { error: string }> {
   return { error: 'Codex is unavailable. Start Codex Desktop or install the Codex CLI, then restart Project Lens.' }
 }
 
-export function codexArgs(workspace: string, model?: string) { return ['exec', '--json', '--ephemeral', '--sandbox', 'read-only', '-C', workspace, '--skip-git-repo-check', ...(model ? ['--model', model] : []), '-'] }
-
-export function extractCodexText(events: Record<string, unknown>[]) {
-  return events.flatMap((event) => {
-    const item = event.item as { type?: unknown; text?: unknown } | undefined
-    return event.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string' ? [item.text] : []
-  }).at(-1) ?? ''
-}
+export function codexArgs(workspace: string, model: string | undefined, schemaPath: string, outputPath: string) { return ['exec', '--json', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), '--output-schema', schemaPath, '--output-last-message', outputPath, '-C', workspace, '-'] }
 
 export function parseCodexJson(text: string): unknown {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
@@ -70,7 +63,7 @@ export function parseCodexJson(text: string): unknown {
 
 export async function runCodex(executable: string, options: CodexRunOptions): Promise<CodexRunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, codexArgs(options.cwd, options.model), { cwd: options.cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(executable, codexArgs(options.cwd, options.model, options.schemaPath, options.outputPath), { cwd: options.cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     options.onProcess?.(child)
     let stdout = ''; let stderr = ''; const events: Record<string, unknown>[] = []; let buffer = ''; let completed = false; let settled = false
     const done = (code: number | null) => { if (!settled) { settled = true; resolve({ code, stdout, stderr, events, completed }) } }

@@ -36,6 +36,7 @@ function checkSection(section: PresentationSection, knownPaths: Set<string>, iss
 
 function validatePresentation(presentation: PresentationKnowledgeBase, knowledge: ProjectKnowledgeBase): string[] {
   const issues: string[] = []
+  if (presentation.version !== '1.0') issues.push('project: unsupported schema version')
   const knownPaths = new Set(knowledge.importantFiles?.map((file) => file.path) ?? [])
   const partIds = new Set(knowledge.projectParts?.map((part) => part.id) ?? [])
   if (!presentation.projectName.trim()) issues.push('project: missing name')
