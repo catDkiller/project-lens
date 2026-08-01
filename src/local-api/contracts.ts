@@ -23,6 +23,7 @@ export interface AnalysisRunStatusDto {
   runId: string
   projectId: string
   agentId: 'codex'
+  model?: string
   codexVersion?: string
   state: AnalysisRunState
   createdAt: string

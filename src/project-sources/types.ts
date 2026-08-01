@@ -5,7 +5,7 @@ export interface ProjectFile { path: string; content: string }
 export interface NormalizedProject {
   id: string
   name: string
-  framework: 'react-vite'
+  framework: string
   files: ProjectFile[]
 }
 

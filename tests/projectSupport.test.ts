@@ -11,11 +11,11 @@ describe('local project support', () => {
     expect(assessLocalProject(supported).support).toBe('supported')
   })
 
-  it('rejects a random folder with no framework evidence', () => {
-    expect(assessLocalProject([{ path: 'main.py', content: 'print(1)' }]).support).toBe('unsupported')
+  it('accepts a random text-based software folder', () => {
+    expect(assessLocalProject([{ path: 'main.py', content: 'print(1)' }])).toMatchObject({ support: 'supported', projectType: 'Software project' })
   })
 
   it('does not rely on the project display name', () => {
-    expect(assessLocalProject([{ path: 'Python/package.json', content: JSON.stringify({ dependencies: { react: '^19' } }) }, { path: 'Python/src/main.ts', content: '' }]).support).toBe('unsupported')
+    expect(assessLocalProject([{ path: 'Python/package.json', content: JSON.stringify({ dependencies: { react: '^19' } }) }, { path: 'Python/src/main.ts', content: '' }])).toMatchObject({ support: 'supported', projectType: 'JavaScript/TypeScript' })
   })
 })

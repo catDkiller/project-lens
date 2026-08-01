@@ -11,12 +11,12 @@ import { PROJECT_EXPLANATION_PROMPT_VERSION, PROJECT_EXPLANATION_SYSTEM_PROMPT, 
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto } from './contracts'
 import { createAnalysisWorkspace, createProjectAnalysisWorkspace, changedFiles, fileManifest, removeAnalysisWorkspace } from './analysisWorkspace'
-import { detectCodex, extractCodexText, redact, runCodex } from './codex'
+import { detectCodex, extractCodexText, parseCodexJson, redact, runCodex } from './codex'
 import { quarantineProjectControls } from './projectControls'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
 
-type Project = Awaited<ReturnType<typeof sampleProject>>
-type Run = { runId: string; projectId: string; agentId: 'codex'; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local' }
+type Project = { id: string; name: string; framework: string; files: { path: string; content: string }[] }
+type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local' }
 const runs = new Map<string, Run>()
 const cache = new Map<string, PresentationKnowledgeBase>()
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
@@ -58,20 +58,20 @@ async function execute(run: Run) {
     await writeFile(path.join(workspace.directory, requestName), JSON.stringify({ schemaMarker: 'project-lens-request-v1', promptVersion: PROJECT_EXPLANATION_PROMPT_VERSION, rawKnowledge: raw, quarantinedControls }, null, 2), 'utf8')
     const baseline = await fileManifest(workspace.directory)
     setState(run, 'spawning-agent'); event(run, { type: 'starting-agent', message: 'Starting Codex in a disposable read-only workspace.' })
-    const result = await runCodex(codex.executable, { cwd: workspace.directory, input: prompt(requestName), signal: run.controller.signal, onProcess: (child) => { run.child = child; run.childPid = child.pid; setState(run, 'agent-process-running') }, onEvent: (item) => { setState(run, 'receiving-agent-events'); event(run, { type: 'analysing', message: item.type === 'turn.started' ? 'Codex is analysing the prepared project.' : 'Codex reported progress.' }, true) } })
+    const result = await runCodex(codex.executable, { cwd: workspace.directory, model: run.model, input: prompt(requestName), signal: run.controller.signal, onProcess: (child) => { run.child = child; run.childPid = child.pid; setState(run, 'agent-process-running') }, onEvent: (item) => { setState(run, 'receiving-agent-events'); event(run, { type: 'analysing', message: item.type === 'turn.started' ? 'Codex is analysing the prepared project.' : 'Codex reported progress.' }, true) } })
     run.child = undefined; run.childPid = undefined
     if (changedFiles(baseline, await fileManifest(workspace.directory)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
     if (result.code !== 0 || !result.completed) throw Object.assign(new Error(redact(result.stderr) || 'Codex did not complete the analysis.'), { code: 'codex-invocation-failed', exitCode: result.code })
     setState(run, 'validating'); event(run, { type: 'validating', message: 'Validating the generated project guide.' })
     let text = extractCodexText(result.events); let output: unknown; let issues: string[]
-    try { output = JSON.parse(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
+    try { output = parseCodexJson(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
     if (issues.length && text.trim()) {
       setState(run, 'repairing'); event(run, { type: 'repairing', message: 'Repairing the returned JSON against the required schema.' })
       const repair = await runCodex(codex.executable, { cwd: workspace.directory, input: `${prompt(requestName)}\n\nYour previous response failed validation: ${issues.join('; ')}. Return a corrected JSON object only. Previous response:\n${text}`, signal: run.controller.signal, onEvent: () => event(run, { type: 'repairing', message: 'Codex is repairing the structured response.' }, true) })
       if (changedFiles(baseline, await fileManifest(workspace.directory)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
       if (repair.code !== 0 || !repair.completed) throw Object.assign(new Error(redact(repair.stderr) || 'Codex did not complete the schema repair.'), { code: 'codex-invocation-failed', exitCode: repair.code })
       text = extractCodexText(repair.events)
-      try { output = JSON.parse(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
+      try { output = parseCodexJson(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
     }
     if (issues.length) throw Object.assign(new Error(`Codex output could not be validated: ${issues.join('; ')}`), { code: 'output-invalid' })
     cache.set(key, output as PresentationKnowledgeBase); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', result: output as PresentationKnowledgeBase, message: 'Opened the generated workspace.' })
@@ -91,11 +91,11 @@ export const daemon = createServer(async (req, res) => {
   if (req.method === 'POST' && (url.pathname === '/api/analysis/sample' || url.pathname === '/api/analysis/local')) {
     if (activeRun()) return send(res, 409, { error: 'An analysis is already running.' })
     try {
-      const parsed = JSON.parse(await body(req, 2_000_000)) as { name?: string; files?: { path: string; content: string }[] }
+      const parsed = JSON.parse(await body(req, 2_000_000)) as { name?: string; files?: { path: string; content: string }[]; model?: string }
       const local = url.pathname.endsWith('/local')
       const project = local ? localProject(parsed.name ?? 'Local project', prepareLocalFiles((parsed.files ?? []).map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength }))).files) : undefined
       if (local && !project?.files.length) return send(res, 400, { error: 'No supported project text files were included.' })
-      const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined }
+      const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: typeof parsed.model === 'string' ? parsed.model : undefined, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined }
       runs.set(run.runId, run); event(run, { type: 'queued', message: 'Preparing the project.' }); void execute(run).catch((error) => fail(run, error)); return send(res, 202, { runId: run.runId })
     } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Invalid analysis request.' }) }
   }

@@ -1,7 +1,7 @@
 import type { NormalizedProject, ProjectFile } from './types'
 
 const ignoredDirectories = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.cache'])
-const textExtensions = new Set(['.js', '.jsx', '.ts', '.tsx', '.css', '.json', '.html', '.md', '.txt', '.svg'])
+const textExtensions = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.css', '.scss', '.less', '.json', '.html', '.htm', '.md', '.txt', '.svg', '.py', '.java', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.cs', '.go', '.rs', '.rb', '.php', '.sh', '.bash', '.sql', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.xml', '.ipynb'])
 const secretName = /(^|\/)(\.env(?:\..*)?|.*\.(pem|key|p12)|auth\.json)$/i
 const MAX_FILE_BYTES = 512_000
 
@@ -42,4 +42,4 @@ export function prepareLocalFiles(candidates: LocalCandidate[]): LocalImportSumm
   return { files: files.sort((a, b) => a.path.localeCompare(b.path)), skipped, size, skippedByReason }
 }
 
-export function localProject(name: string, files: ProjectFile[]): NormalizedProject { return { id: `local-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'project'}`, name, framework: 'react-vite', files } }
+export function localProject(name: string, files: ProjectFile[], framework = 'software'): NormalizedProject { return { id: `local-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'project'}`, name, framework, files } }
