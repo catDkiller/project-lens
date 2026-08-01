@@ -51,7 +51,7 @@ async function execute(run: Run) {
   const analysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, state) => { if (state === 'running') event(run, { type: 'analysing', message: `Checking ${stage}.` }) }, 0)
   const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, run.source ? 'Local folder' : 'Prepared sample')
   const workspace = run.source ? await createProjectAnalysisWorkspace(project.files) : await createAnalysisWorkspace(sampleRoot)
-  const evidenceDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-evidence-')); const schemaDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-schema-')); const schemaPath = path.join(schemaDirectory, 'presentation-schema.json'); const outputPath = path.join(schemaDirectory, 'final-output.json'); await writeFile(schemaPath, JSON.stringify(createPresentationSchema()), 'utf8')
+  const evidenceDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-evidence-')); const schemaPath = path.join(workspace.directory, '.project-lens-schema.json'); const outputPath = path.join(workspace.directory, '.project-lens-final-output.json'); await writeFile(schemaPath, JSON.stringify(createPresentationSchema()), 'utf8'); await writeFile(outputPath, '', 'utf8')
   try {
     const quarantinedControls = await quarantineProjectControls(workspace.directory, evidenceDirectory)
     const requestName = '.project-lens-request.json'
@@ -60,7 +60,7 @@ async function execute(run: Run) {
     setState(run, 'spawning-agent'); event(run, { type: 'starting-agent', message: 'Starting Codex in a disposable read-only workspace.' })
     const result = await runCodex(codex.executable, { cwd: workspace.directory, model: run.model, schemaPath, outputPath, input: prompt(requestName), signal: run.controller.signal, onProcess: (child) => { run.child = child; run.childPid = child.pid; setState(run, 'agent-process-running') }, onEvent: (item) => { setState(run, 'receiving-agent-events'); event(run, { type: 'analysing', message: item.type === 'turn.started' ? 'Codex is analysing the prepared project.' : 'Codex reported progress.' }, true) } })
     run.child = undefined; run.childPid = undefined
-    if (changedFiles(baseline, await fileManifest(workspace.directory)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
+    if (changedFiles(baseline, await fileManifest(workspace.directory)).filter((file) => !['.project-lens-schema.json', '.project-lens-final-output.json'].includes(file)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
     if (result.code !== 0 || !result.completed) throw Object.assign(new Error(redact(result.stderr) || 'Codex did not complete the analysis.'), { code: 'codex-invocation-failed', exitCode: result.code })
     setState(run, 'validating'); event(run, { type: 'validating', message: 'Validating the generated project guide.' })
     let text = ''; try { text = (await readFile(outputPath, 'utf8')).slice(0, 1_000_000) } catch { /* final output is required below */ } let output: unknown; let issues: string[]
@@ -68,14 +68,14 @@ async function execute(run: Run) {
     if (issues.length && text.trim()) {
       setState(run, 'repairing'); event(run, { type: 'repairing', message: 'Repairing the returned JSON against the required schema.' })
       const repair = await runCodex(codex.executable, { cwd: workspace.directory, model: run.model, schemaPath, outputPath, input: `Return corrected JSON only. Validation errors: ${issues.join('; ')}. Previous response:\n${text}`, signal: run.controller.signal, onEvent: () => event(run, { type: 'repairing', message: 'Codex is repairing the structured response.' }, true) })
-      if (changedFiles(baseline, await fileManifest(workspace.directory)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
+      if (changedFiles(baseline, await fileManifest(workspace.directory)).filter((file) => !['.project-lens-schema.json', '.project-lens-final-output.json'].includes(file)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
       if (repair.code !== 0 || !repair.completed) throw Object.assign(new Error(redact(repair.stderr) || 'Codex did not complete the schema repair.'), { code: 'codex-invocation-failed', exitCode: repair.code })
       try { text = (await readFile(outputPath, 'utf8')).slice(0, 1_000_000) } catch { text = '' }
       try { output = parseCodexJson(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
     }
     if (issues.length) throw Object.assign(new Error(`Codex output could not be validated: ${issues.join('; ')}`), { code: 'output-invalid' })
     cache.set(key, output as PresentationKnowledgeBase); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', result: output as PresentationKnowledgeBase, message: 'Opened the generated workspace.' })
-  } finally { await removeAnalysisWorkspace(workspace.directory, run.source ? (workspace as { source?: string }).source : undefined); await rm(evidenceDirectory, { recursive: true, force: true, maxRetries: 3 }); await rm(schemaDirectory, { recursive: true, force: true, maxRetries: 3 }) }
+  } finally { await removeAnalysisWorkspace(workspace.directory, run.source ? (workspace as { source?: string }).source : undefined); await rm(evidenceDirectory, { recursive: true, force: true, maxRetries: 3 }) }
 }
 
 function fail(run: Run, error: unknown) { if (run.terminalOutcome) return; const cancelled = error instanceof Error && /cancelled/i.test(error.message); const detail = error as { code?: AnalysisEventDto['diagnostic'] extends { code?: infer Code } ? Code : never; exitCode?: number }; run.terminalOutcome = cancelled ? 'cancelled' : 'failed'; setState(run, cancelled ? 'cancelled' : 'failed'); event(run, { type: cancelled ? 'cancelled' : 'failed', error: cancelled ? 'Analysis was cancelled.' : error instanceof Error ? error.message : 'Analysis failed.', diagnostic: { code: detail?.code ?? 'unknown', exitCode: detail?.exitCode, stderr: error instanceof Error ? redact(error.message) : undefined, codexVersion: run.codexVersion } }) }

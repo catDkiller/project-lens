@@ -79,4 +79,4 @@ export async function runCodex(executable: string, options: CodexRunOptions): Pr
   })
 }
 
-export function redact(value: string) { return value.replaceAll('\u001b', '').replaceAll('\u009b', '').replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500) }
+export function redact(value: string) { const escape = String.fromCharCode(27); return value.replace(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, 'g'), '').replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500) }
