@@ -38,8 +38,9 @@ export function App() {
   const [cancelling, setCancelling] = useState(false)
   const [lastModel, setLastModel] = useState<string>()
   const [projectNotice, setProjectNotice] = useState<string>()
-  const [localProject, setLocalProject] = useState<{ name: string; id: string; files: ProjectFile[]; summary: string; skipped: Record<LocalSkipReason, number> }>()
+  const [localProject, setLocalProject] = useState<{ name: string; id: string; files: ProjectFile[]; summary: string; skipped: Record<LocalSkipReason, number>; support: 'supported' | 'unsupported' | 'too-large' | 'failed'; diagnostics?: string[] }>()
   const [preparedSelected, setPreparedSelected] = useState(false)
+  const [sourceReading, setSourceReading] = useState(false)
   const [appearance, setAppearance] = useState<Appearance>(() => typeof localStorage === 'undefined' ? 'dark' : localStorage.getItem('project-lens-appearance') as Appearance || 'dark')
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
   const [webResearchEnabled, _setWebResearchEnabled] = useState(() => typeof localStorage === 'undefined' ? true : localStorage.getItem('project-lens-web-research') !== 'false')
@@ -129,7 +130,7 @@ export function App() {
     } catch { setError('The prepared sample could not be analysed. Try again.'); setMode('launcher') }
   }
 
-  function selectPreparedSample() { setLocalProject(undefined); setPreparedSelected(true); setError(undefined); setProjectNotice(undefined) }
+  function selectPreparedSample() { setSourceReading(false); setLocalProject(undefined); setPreparedSelected(true); setError(undefined); setProjectNotice(undefined) }
 
   async function analyseWithOpenCode(modelId: string) {
     setMode('analysing'); setError(undefined); setAnalysisStage(undefined); setLastModel(modelId); setAnalysisStartedAt(Date.now()); setAnalysisEvents([])
@@ -153,9 +154,9 @@ export function App() {
     } catch (reason) { setRunId(undefined); setError(typeof reason === 'object' && reason && 'error' in reason ? String(reason.error) : 'Analysis could not start.'); setMode('failed') }
   }
 
-  async function importLocalProject(name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>) {
+  async function importLocalProject(name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>, support: 'supported' | 'unsupported' | 'too-large' | 'failed', diagnostics?: string[]) {
     const project = await localFolderProjectSource(name, files).load()
-    setPreparedSelected(false); setLocalProject({ name: project.name, id: project.id, files: project.files, summary, skipped })
+    setPreparedSelected(false); setLocalProject({ name: project.name, id: project.id, files: project.files, summary, skipped, support, diagnostics })
     setError(undefined); setAnalysisStage(undefined); setProjectNotice(summary); setMode('launcher')
   }
 
@@ -163,10 +164,11 @@ export function App() {
   async function checkReadiness() { const response = await apiFetch('/api/opencode/readiness'); const result = await response.json() as { ready?: boolean; message?: string }; if (response.ok && result.ready) { setError(undefined); setRuntimeStatus('OpenCode readiness confirmed'); setMode('launcher') } else setError(result.message ?? 'OpenCode is still busy. Try again later.') }
   async function connectProvider(providerId: string) { const response = await apiFetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json() as ProviderAuthSessionDto & { error?: string }; if (response.ok) setAuthSession(result); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
-  const source = localProject ? { kind: 'local' as const, name: localProject.name, summary: localProject.summary } : preparedSelected ? { kind: 'prepared' as const } : undefined
-  const launcherState = deriveLauncherState(agents, models, source, typeof localStorage === 'undefined' ? undefined : localStorage.getItem('project-lens-runtime') ?? undefined, typeof localStorage === 'undefined' ? undefined : localStorage.getItem('project-lens-model') ?? undefined)
+  const source = localProject ? { kind: 'local' as const, name: localProject.name, summary: localProject.summary, support: localProject.support, diagnostics: localProject.diagnostics } : preparedSelected ? { kind: 'prepared' as const } : undefined
+  const launcherRun = mode === 'analysing' ? { status: runId ? 'running' as const : 'starting' as const } : mode === 'failed' ? { status: 'failed' as const, error } : { status: 'idle' as const }
+  const launcherState = deriveLauncherState(agents, models, source, typeof localStorage === 'undefined' ? undefined : localStorage.getItem('project-lens-runtime') ?? undefined, typeof localStorage === 'undefined' ? undefined : localStorage.getItem('project-lens-model') ?? undefined, launcherRun, sourceReading)
   const analyseSelectedSource = () => { if (!launcherState.canAnalyse || launcherState.activeRuntime?.id !== 'opencode' || !launcherState.execution) return; localStorage.setItem('project-lens-model', launcherState.execution.fullId); void analyseWithOpenCode(launcherState.execution.fullId) }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
   if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} startedAt={analysisStartedAt} runState={runStatus?.state} lastAnyEventAt={runStatus?.lastAnyEventAt} lastGenuineAgentEventAt={runStatus?.lastGenuineAgentEventAt} cancelling={cancelling} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} onConnectOpenCode={() => void connectProvider('opencode')} onCheckReadiness={() => void checkReadiness()} />
-  return <ReleaseLauncher state={launcherState} onUsePrepared={selectPreparedSample} onImportLocal={importLocalProject} onAnalyse={analyseSelectedSource} />
+  return <ReleaseLauncher state={launcherState} onUsePrepared={selectPreparedSample} onImportLocal={importLocalProject} onSourceReading={setSourceReading} onAnalyse={analyseSelectedSource} />
 }

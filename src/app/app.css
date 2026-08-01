@@ -176,7 +176,7 @@
   gap: 1.25rem;
   justify-items: center;
   min-width: 0;
-  padding: 4.5rem 1.5rem 2rem;
+  padding: 3.25rem 1.5rem 2rem;
   width: 100%;
 }
 
@@ -245,6 +245,13 @@ h1 {
   min-height: 3rem;
   width: 100%;
 }
+
+.launcher-project-control { min-width: 0; width: 100%; }
+.release-launcher .launcher-folder { justify-content: space-between; gap: 1rem; }
+.release-launcher .launcher-folder > span:last-child { color: var(--accent); flex: none; font-size: .78rem; font-weight: 700; }
+.release-launcher .folder-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.release-launcher .launcher-folder:disabled { opacity: .65; }
+.launcher-disabled-reason { color: var(--fg-secondary); }
 
 .release-launcher .link-sample,
 .release-launcher .launcher-analyse {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveLauncherState } from '../src/app/launcherState'
+import { deriveCanonicalLauncherState, deriveLauncherState } from '../src/app/launcherState'
 
 const readyOpenCode = { id: 'opencode', displayName: 'OpenCode', installed: true, status: 'available' as const, readiness: 'ready' as const }
 const unavailableCodex = { id: 'codex', displayName: 'Codex', installed: true, status: 'available' as const, readiness: 'unhealthy' as const }
@@ -19,5 +19,19 @@ describe('release launcher state', () => {
     expect(state.disabledReason).toBe('AI setup is required.')
     expect(state.privacyDescription).toContain('active AI engine')
   })
-})
 
+  it('uses explicit precedence for reading, source errors, engine and run states', () => {
+    const base = { engine: { status: 'ready' as const }, runtimeSafetyReady: true }
+    expect(deriveCanonicalLauncherState({ ...base, source: { status: 'empty' }, run: { status: 'idle' } }).view).toBe('EMPTY')
+    expect(deriveCanonicalLauncherState({ ...base, source: { status: 'reading' }, run: { status: 'idle' } }).view).toBe('READING_SOURCE')
+    expect(deriveCanonicalLauncherState({ ...base, source: { status: 'local-unsupported' }, run: { status: 'idle' } }).view).toBe('UNSUPPORTED_SOURCE')
+    expect(deriveCanonicalLauncherState({ ...base, source: { status: 'prepared' }, run: { status: 'starting' } }).view).toBe('STARTING')
+  })
+
+  it('exposes exactly one concise reason and gates analysis on safety', () => {
+    const state = deriveCanonicalLauncherState({ source: { status: 'prepared' }, engine: { status: 'ready' }, run: { status: 'idle' }, runtimeSafetyReady: false })
+    expect(state.canAnalyse).toBe(false)
+    expect(state.disabledReason).toBeTruthy()
+    expect(state.privacyDescription).toContain('Relevant project text may be sent')
+  })
+})
