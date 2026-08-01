@@ -1027,3 +1027,5 @@ summary {
     white-space: nowrap;
   }
 }
+.agent-picker { display: grid; gap: .35rem; color: var(--muted); font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+.agent-picker select { min-width: 16rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--surface); color: var(--text); padding: .75rem .85rem; font: inherit; text-transform: none; letter-spacing: normal; }

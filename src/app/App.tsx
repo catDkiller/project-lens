@@ -25,6 +25,7 @@ export function App() {
   const [error, setError] = useState<string>()
   const [analysisStage, setAnalysisStage] = useState<AnalysisStageId>()
   const [agent, setAgent] = useState<AgentStatusDto>()
+  const [agents, setAgents] = useState<AgentStatusDto[]>([])
   const [models, setModels] = useState<ModelDto[]>([])
   const [providers, setProviders] = useState<ProviderDto[]>([])
   const [authSession, setAuthSession] = useState<ProviderAuthSessionDto>()
@@ -53,7 +54,8 @@ export function App() {
       setApiToken(health.token)
       const authHeaders = { 'x-project-lens-token': health.token }
       const agents = await fetch('/api/agents', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<AgentStatusDto[]> : Promise.reject())
-      const detected = agents[0]; setAgent(detected)
+      setAgents(agents)
+      const detected = agents.find((item) => item.readiness === 'ready') ?? agents[0]; setAgent(detected)
       if (!detected?.installed) { setRuntimeStatus(detected?.error ?? 'OpenCode is unavailable. Install and configure OpenCode, then restart Project Lens.'); return }
       setRuntimeStatus('Loading OpenCode models…')
       const discovered = await fetch('/api/agents/opencode/models', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<ModelDto[]> : Promise.reject(await response.json()))
@@ -159,5 +161,5 @@ export function App() {
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
   if (mode === 'workspace' && knowledge) return <KnowledgeWorkspace knowledge={knowledge} projectNotice={projectNotice} appearance={appearance} accent={accent} onAppearance={setAppearance} onAccent={setAccent} onReturn={returnToLauncher} onReanalyse={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} />
   if (mode === 'analysing' || mode === 'failed') return <AnalysisProgress projectName={localProject?.name ?? 'prepared sample'} modelId={lastModel} events={analysisEvents} startedAt={analysisStartedAt} runState={runStatus?.state} lastAnyEventAt={runStatus?.lastAnyEventAt} lastGenuineAgentEventAt={runStatus?.lastGenuineAgentEventAt} cancelling={cancelling} failed={mode === 'failed' ? error : undefined} onCancel={cancelAnalysis} onRetry={() => lastModel ? analyseWithOpenCode(lastModel) : openPreparedSample()} onChooseModel={() => setMode('launcher')} onConnectOpenCode={() => void connectProvider('opencode')} onCheckReadiness={() => void checkReadiness()} />
-  return <Launcher agent={agent} models={models} providers={providers} authSession={authSession} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} webResearchEnabled={webResearchEnabled} onAppearance={setAppearance} onAccent={setAccent} onWebResearchEnabled={setWebResearchEnabled} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} onCheckConnection={checkConnection} onCancelConnection={cancelConnection} />
+  return <Launcher agents={agents} agent={agent} models={models} providers={providers} authSession={authSession} runtimeStatus={runtimeStatus} isAnalysing={false} analysisStage={analysisStage} error={error} appearance={appearance} accent={accent} selectedProjectName={localProject?.name} selectedProjectSummary={localProject?.summary} selectedProjectSkipped={localProject?.skipped} webResearchEnabled={webResearchEnabled} onAppearance={setAppearance} onAccent={setAccent} onWebResearchEnabled={setWebResearchEnabled} onTrySample={analyseWithOpenCode} onUsePrepared={openPreparedSample} onImportLocal={importLocalProject} onCancel={cancelAnalysis} onSelectAgent={(id) => setAgent(agents.find((item) => item.id === id))} onRefreshProviders={refreshProviders} onRefreshModels={refreshModels} onConnectProvider={connectProvider} onDisconnectProvider={disconnectProvider} onCheckConnection={checkConnection} onCancelConnection={cancelConnection} />
 }

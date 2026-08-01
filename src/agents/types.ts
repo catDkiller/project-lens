@@ -1,4 +1,5 @@
 export type AgentReadiness = 'unavailable' | 'installed' | 'needs-authentication' | 'ready' | 'unhealthy'
+export type RuntimeReadiness = 'ready' | 'sign-in-required' | 'installed-but-unavailable' | 'not-installed' | 'checking' | 'incompatible'
 export type AgentAuthenticationStatus = 'disconnected' | 'launching' | 'waiting-for-user' | 'connected' | 'cancelled' | 'launch-failed' | 'verification-failed'
 export type ModelReadiness = 'catalogue-only' | 'requires-provider' | 'ready' | 'temporarily-unavailable' | 'removed' | 'unknown'
 
@@ -69,4 +70,22 @@ export interface AgentAdapter {
   providers: () => Promise<AgentProvider[]>
   healthCheck: () => Promise<AgentSnapshot>
   diagnostics: () => Promise<AgentDiagnostics>
+}
+
+export interface AgentRuntime {
+  id: string
+  displayName: string
+  executable?: string
+  version?: string
+  installationStatus: 'installed' | 'not-installed'
+  authenticationStatus: AgentAuthenticationStatus
+  readiness: RuntimeReadiness
+  capabilities: AgentCapabilities
+  defaultModelLabel?: string
+  detect: () => Promise<AgentRuntime>
+  checkAuthentication: () => Promise<AgentAuthenticationStatus>
+  checkReadiness: () => Promise<RuntimeReadiness>
+  runAnalysis: (...args: unknown[]) => Promise<unknown>
+  cancel: () => Promise<void>
+  normalizeEvents: (event: unknown) => AgentDiagnostics | undefined
 }

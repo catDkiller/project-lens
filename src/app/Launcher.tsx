@@ -9,9 +9,9 @@ import type { Accent, Appearance } from './ThemeMenu'
 import { ThemeMenu } from './ThemeMenu'
 
 interface LauncherProps {
-  agent?: AgentStatusDto; models: ModelDto[]; providers?: ProviderDto[]; authSession?: ProviderAuthSessionDto; runtimeStatus: string; isAnalysing: boolean; analysisStage?: AnalysisStageId; error?: string; appearance: Appearance; accent: Accent
+  agents?: AgentStatusDto[]; agent?: AgentStatusDto; models: ModelDto[]; providers?: ProviderDto[]; authSession?: ProviderAuthSessionDto; runtimeStatus: string; isAnalysing: boolean; analysisStage?: AnalysisStageId; error?: string; appearance: Appearance; accent: Accent
   selectedProjectName?: string; selectedProjectSummary?: string; selectedProjectSkipped?: Partial<Record<LocalSkipReason, number>>; webResearchEnabled: boolean
-  onAppearance: (value: Appearance) => void; onAccent: (value: Accent) => void; onWebResearchEnabled: (value: boolean) => void; onTrySample: (modelId: string) => void; onUsePrepared: () => void; onImportLocal: (name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>) => void; onCancel: () => void
+  onAppearance: (value: Appearance) => void; onAccent: (value: Accent) => void; onWebResearchEnabled: (value: boolean) => void; onTrySample: (modelId: string) => void; onUsePrepared: () => void; onImportLocal: (name: string, files: ProjectFile[], summary: string, skipped: Record<LocalSkipReason, number>) => void; onCancel: () => void; onSelectAgent?: (id: string) => void
   onRefreshProviders?: () => void; onRefreshModels?: () => void; onConnectProvider?: (providerId: string) => void; onDisconnectProvider?: (providerId: string) => void; onCheckConnection?: () => void; onCancelConnection?: () => void
 }
 type DirectoryHandle = { name: string; values: () => AsyncIterableIterator<DirectoryHandle | FileSystemFileHandle>; kind: 'directory' }
@@ -26,7 +26,7 @@ function ModelGroup({ label, models, selectedId, highlightedId, onHighlight, onC
   return <section className="model-provider-group" aria-label={label}><p>{label}</p>{models.map((item) => <button key={item.fullId} className={`model-option${item.fullId === selectedId ? ' selected' : ''}${item.fullId === highlightedId ? ' highlighted' : ''}`} disabled={status === 'Unavailable'} title={item.fullId} type="button" onPointerMove={() => onHighlight(item.fullId)} onFocus={() => onHighlight(item.fullId)} onClick={() => onChoose(item)}><strong>{item.displayName}</strong><span>{item.providerId} · {item.free || item.explicitlyFree ? 'Free · ' : ''}{status}</span></button>)}</section>
 }
 
-export function Launcher({ agent, models = [], providers = [], authSession, runtimeStatus = 'Checking local runtime…', isAnalysing, analysisStage, error, appearance, accent, selectedProjectName, selectedProjectSummary, selectedProjectSkipped, webResearchEnabled, onAppearance, onAccent, onWebResearchEnabled, onTrySample, onUsePrepared, onImportLocal, onCancel, onRefreshProviders = () => {}, onRefreshModels = () => {}, onConnectProvider = () => {}, onDisconnectProvider = () => {}, onCheckConnection = () => {}, onCancelConnection = () => {} }: LauncherProps) {
+export function Launcher({ agents = [], agent, models = [], providers = [], authSession, runtimeStatus = 'Checking local runtime…', isAnalysing, analysisStage, error, appearance, accent, selectedProjectName, selectedProjectSummary, selectedProjectSkipped, webResearchEnabled, onAppearance, onAccent, onWebResearchEnabled, onTrySample, onUsePrepared, onImportLocal, onCancel, onSelectAgent = () => {}, onRefreshProviders = () => {}, onRefreshModels = () => {}, onConnectProvider = () => {}, onDisconnectProvider = () => {}, onCheckConnection = () => {}, onCancelConnection = () => {} }: LauncherProps) {
   const triggerRef = useRef<HTMLButtonElement>(null); const pickerRef = useRef<FolderInput>(null); const restoreFocusRef = useRef(true); const [model, setModel] = useState(() => typeof localStorage === 'undefined' ? '' : localStorage.getItem('project-lens-model') ?? ''); const [open, setOpen] = useState(false); const [query, setQuery] = useState(''); const [highlightedId, setHighlightedId] = useState<string>(); const [folderStatus, setFolderStatus] = useState(''); const [readingFolder, setReadingFolder] = useState(false); const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
   const selected = models.find((item) => item.fullId === model); const isReady = (item?: ModelDto) => Boolean(item && (item.readiness === 'ready' || (item.readiness === undefined && item.runnable === true && item.availability === 'ready'))); const canChoose = isReady; const ready = isReady(selected); const waiting = authSession?.status === 'launching' || authSession?.status === 'waiting-for-user'; const visible = models.filter((item) => `${item.displayName} ${item.providerId} ${item.fullId}`.toLowerCase().includes(query.toLowerCase())); const selectable = visible.filter(canChoose); const readyModels = visible.filter(isReady); const setupModels = visible.filter((item) => item.readiness === 'setup-required' || item.availability === 'requires-provider'); const unavailableModels = visible.filter((item) => !isReady(item) && !setupModels.includes(item)); const skipped = Object.entries(selectedProjectSkipped ?? {}).filter(([, count]) => count)
   const [confirmedCostModelId, setConfirmedCostModelId] = useState<string>()
@@ -108,12 +108,13 @@ export function Launcher({ agent, models = [], providers = [], authSession, runt
           </button>
           <input ref={pickerRef} className="folder-input" type="file" multiple onChange={(event) => void fallbackFolder(event)} />
           <div className="launcher-divider" />
+          <label className="agent-picker">AI agent<select aria-label="AI agent" value={agent?.id ?? ''} onChange={(event) => onSelectAgent(event.target.value)}>{agents.map((item) => <option key={item.id} value={item.id}>{item.displayName} · {item.readiness === 'ready' ? 'Ready' : item.readiness === 'needs-authentication' ? 'Sign in required' : item.installed ? 'Unavailable' : 'Not installed'}</option>)}</select></label>
           <div className="launcher-controls">
             <button ref={triggerRef} className="model-trigger" type="button" role="combobox" aria-expanded={open} onClick={() => { restoreFocusRef.current = true; setOpen((value) => !value) }}>
               <span>{selected?.displayName ?? (agent?.installed ? 'Choose a model' : 'OpenCode unavailable')}</span>
             </button>
             {popup}
-            <button className="launcher-analyse" disabled={isAnalysing || waiting || readingFolder || !agent?.installed || !selected || !ready} type="button" onClick={startSelectedAnalysis}>
+            <button className="launcher-analyse" disabled={isAnalysing || waiting || readingFolder || agent?.id !== 'opencode' || !agent?.installed || !selected || !ready} type="button" onClick={startSelectedAnalysis}>
               {selectedProjectName ? 'Analyse project' : 'Analyse sample'}
             </button>
           </div>
