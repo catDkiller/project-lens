@@ -224,6 +224,38 @@ h1 {
   width: 100%;
 }
 
+.release-launcher {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+}
+
+.release-launcher .launcher-section-label,
+.release-launcher .local-support,
+.release-launcher .folder-status,
+.release-launcher .ai-ready {
+  margin: 0;
+}
+
+.release-launcher .launcher-folder {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  flex: none;
+  min-height: 3rem;
+  width: 100%;
+}
+
+.release-launcher .link-sample,
+.release-launcher .launcher-analyse {
+  align-self: flex-start;
+}
+
+.release-launcher .launcher-divider {
+  height: 1px;
+  width: 100%;
+}
+
 .launcher-folder {
   align-items: center;
   background: none;
