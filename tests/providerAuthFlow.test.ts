@@ -47,4 +47,14 @@ describe('provider authentication flow', () => {
     expect(server).toContain('if (!res.writableEnded) res.end()')
     expect(server).toContain('req.removeListener')
   })
+
+  it('keeps runtime polling callbacks stable and Strict Mode guarded', async () => {
+    const app = await readFile(new URL('../src/app/App.tsx', import.meta.url), 'utf8')
+    expect(app).toContain('useCallback, useEffect, useRef, useState')
+    expect(app).toContain('const runtimeLoadStarted = useRef(false)')
+    expect(app).toContain('if (runtimeLoadStarted.current) return')
+    expect(app).toContain('}, [runId, apiFetch])')
+    expect(app).toContain('}, [authSession?.id, authSession?.status, checkConnection])')
+    expect(app).toContain('const checkConnection = useCallback')
+  })
 })

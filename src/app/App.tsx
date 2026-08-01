@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { analysisStages, runProjectAnalysis } from '../analysis'
 import type { AnalysisStageId, ProjectAnalysis } from '../analysis'
 import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
@@ -41,33 +41,12 @@ export function App() {
   const [accent, setAccent] = useState<Accent>(() => typeof localStorage === 'undefined' ? 'blue' : localStorage.getItem('project-lens-accent') as Accent || 'blue')
   const [webResearchEnabled, setWebResearchEnabled] = useState(() => typeof localStorage === 'undefined' ? true : localStorage.getItem('project-lens-web-research') !== 'false')
   const [apiToken, setApiToken] = useState<string>()
-  async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const runtimeLoadStarted = useRef(false)
+  const apiFetch = useCallback(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const headers = new Headers(init.headers); if (apiToken) headers.set('x-project-lens-token', apiToken)
     return fetch(input, { ...init, headers })
-  }
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', appearance === 'dark')
-    document.documentElement.dataset.accent = accent
-    localStorage.setItem('project-lens-appearance', appearance); localStorage.setItem('project-lens-accent', accent); localStorage.setItem('project-lens-web-research', String(webResearchEnabled))
-  }, [appearance, accent, webResearchEnabled])
-
-  useEffect(() => { void loadRuntime() }, [])
-  useEffect(() => {
-    if (!authSession || authSession.status !== 'waiting-for-user') return
-    const timer = window.setInterval(() => { void checkConnection(authSession.id) }, 3_000)
-    return () => window.clearInterval(timer)
-  }, [authSession])
-  useEffect(() => {
-    if (!runId) return
-    const poll = async () => {
-      const response = await apiFetch(`/api/analysis/${runId}`)
-      if (!response.ok) { setRunStatus(undefined); setRunId(undefined); setError('The analysis session was interrupted because the local service restarted.'); setMode('failed'); return }
-      const status = await response.json() as AnalysisRunStatusDto; setRunStatus(status)
-    }
-    void poll(); const timer = window.setInterval(() => { void poll() }, 3_000); return () => window.clearInterval(timer)
-  }, [runId])
-  async function loadRuntime() {
+  }, [apiToken])
+  const loadRuntime = useCallback(async () => {
     try {
       const health = await fetch('/api/runtime/health').then((response) => response.json() as Promise<{ token?: string }>)
       if (!health.token) throw new Error('Daemon token missing')
@@ -82,7 +61,55 @@ export function App() {
       const discoveredProviders = await fetch('/api/opencode/providers', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<ProviderDto[]> : Promise.resolve([]))
       setProviders(discoveredProviders); setRuntimeStatus(discovered.length ? 'OpenCode detected' : 'No configured models. Configure a provider in OpenCode, then restart Project Lens.')
     } catch { setRuntimeStatus('Project Lens could not reach its local runtime. Run npm run dev and try again.') }
-  }
+  }, [])
+  const refreshModels = useCallback(async () => { const response = await apiFetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }, [apiFetch])
+  const refreshProviders = useCallback(async () => { const response = await apiFetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()); await refreshModels() }, [apiFetch, refreshModels])
+  const checkConnection = useCallback(async (id?: string, signal?: AbortSignal) => { if (!id) return; const response = await apiFetch(`/api/opencode/auth-sessions/${id}`, { signal }); const session = await response.json() as ProviderAuthSessionDto; if (!response.ok) { setRuntimeStatus('Project Lens could not verify the OpenCode connection.'); return }; setAuthSession(session); setRuntimeStatus(session.message); if (session.status === 'connected') await refreshProviders() }, [apiFetch, refreshProviders])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', appearance === 'dark')
+    document.documentElement.dataset.accent = accent
+    localStorage.setItem('project-lens-appearance', appearance); localStorage.setItem('project-lens-accent', accent); localStorage.setItem('project-lens-web-research', String(webResearchEnabled))
+  }, [appearance, accent, webResearchEnabled])
+
+  useEffect(() => { if (runtimeLoadStarted.current) return; runtimeLoadStarted.current = true; void loadRuntime() }, [loadRuntime])
+  useEffect(() => {
+    const authSessionId = authSession?.id
+    if (!authSessionId || authSession?.status !== 'waiting-for-user') return
+    const controller = new AbortController()
+    const poll = () => { if (!controller.signal.aborted) void checkConnection(authSessionId, controller.signal).catch(() => undefined) }
+    const timer = window.setInterval(poll, 3_000)
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [authSession?.id, authSession?.status, checkConnection])
+  useEffect(() => {
+    if (!runId) return
+    const controller = new AbortController()
+    const poll = async () => {
+      if (controller.signal.aborted) return
+      const response = await apiFetch(`/api/analysis/${runId}`, { signal: controller.signal })
+      if (!response.ok) { setRunStatus(undefined); setRunId(undefined); setError('The analysis session was interrupted because the local service restarted.'); setMode('failed'); return }
+      const status = await response.json() as AnalysisRunStatusDto; setRunStatus(status)
+    }
+    void poll().catch(() => undefined); const timer = window.setInterval(() => { void poll().catch(() => undefined) }, 3_000); return () => { controller.abort(); window.clearInterval(timer) }
+  }, [runId, apiFetch])
+  /*
+  const loadRuntimeLegacy = useCallback(async () => {
+    try {
+      const health = await fetch('/api/runtime/health').then((response) => response.json() as Promise<{ token?: string }>)
+      if (!health.token) throw new Error('Daemon token missing')
+      setApiToken(health.token)
+      const authHeaders = { 'x-project-lens-token': health.token }
+      const agents = await fetch('/api/agents', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<AgentStatusDto[]> : Promise.reject())
+      const detected = agents[0]; setAgent(detected)
+      if (!detected?.installed) { setRuntimeStatus(detected?.error ?? 'OpenCode is unavailable. Install and configure OpenCode, then restart Project Lens.'); return }
+      setRuntimeStatus('Loading OpenCode models…')
+      const discovered = await fetch('/api/agents/opencode/models', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<ModelDto[]> : Promise.reject(await response.json()))
+      setModels(discovered)
+      const discoveredProviders = await fetch('/api/opencode/providers', { headers: authHeaders }).then(async (response) => response.ok ? response.json() as Promise<ProviderDto[]> : Promise.resolve([]))
+      setProviders(discoveredProviders); setRuntimeStatus(discovered.length ? 'OpenCode detected' : 'No configured models. Configure a provider in OpenCode, then restart Project Lens.')
+    } catch { setRuntimeStatus('Project Lens could not reach its local runtime. Run npm run dev and try again.') }
+  }, [])
+  */
 
   async function openPreparedSample() {
     setLocalProject(undefined); setProjectNotice(undefined)
@@ -126,10 +153,7 @@ export function App() {
 
   async function cancelAnalysis() { if (!runId || cancelling) return; setCancelling(true); await apiFetch(`/api/analysis/${runId}/cancel`, { method: 'POST' }) }
   async function checkReadiness() { const response = await apiFetch('/api/opencode/readiness'); const result = await response.json() as { ready?: boolean; message?: string }; if (response.ok && result.ready) { setError(undefined); setRuntimeStatus('OpenCode readiness confirmed'); setMode('launcher') } else setError(result.message ?? 'OpenCode is still busy. Try again later.') }
-  async function refreshProviders() { const response = await apiFetch('/api/opencode/providers'); if (response.ok) setProviders(await response.json()); await refreshModels() }
-  async function refreshModels() { const response = await apiFetch('/api/opencode/models'); if (response.ok) setModels(await response.json()) }
   async function connectProvider(providerId: string) { const response = await apiFetch('/api/opencode/providers/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); const result = await response.json() as ProviderAuthSessionDto & { error?: string }; if (response.ok) setAuthSession(result); setRuntimeStatus(result.message ?? result.error ?? 'Authentication did not start.') }
-  async function checkConnection(id = authSession?.id) { if (!id) return; const response = await apiFetch(`/api/opencode/auth-sessions/${id}`); const session = await response.json() as ProviderAuthSessionDto; if (!response.ok) { setRuntimeStatus('Project Lens could not verify the OpenCode connection.'); return }; setAuthSession(session); setRuntimeStatus(session.message); if (session.status === 'connected') { await refreshProviders(); await refreshModels() } }
   async function cancelConnection() { if (!authSession) return; const response = await apiFetch(`/api/opencode/auth-sessions/${authSession.id}`, { method: 'POST' }); if (response.ok) { const session = await response.json() as ProviderAuthSessionDto; setAuthSession(session); setRuntimeStatus(session.message) } }
   async function disconnectProvider(providerId: string) { await apiFetch('/api/opencode/providers/disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId }) }); await refreshProviders(); await refreshModels() }
   function returnToLauncher() { setKnowledge(null); setProjectNotice(undefined); setMode('launcher') }
