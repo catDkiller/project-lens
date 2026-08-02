@@ -2,6 +2,7 @@ import { lstat, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
+import { validateSemanticReportV2 } from '../knowledge/reportV2'
 
 export type ArtifactReferenceKind = 'source-file' | 'runtime-generated' | 'external' | 'anchor' | 'unverified' | 'invalid'
 export type ArtifactReference = { kind: ArtifactReferenceKind; reference: string; normalized?: string; evidence?: string }
@@ -73,6 +74,8 @@ export async function readArtifact(artifactsDirectory: string, name: string, man
   if (!text.trim()) throw new Error('artifact-empty')
   if (hasUnsafeControl(text)) throw new Error('artifact-control-characters')
   if (/this is a prepared[- ]sample project|fixture project used for demonstration/i.test(text)) throw new Error('artifact-fixture-claim')
+  const semanticIssues = validateSemanticReportV2(text, name === 'overview.md' ? 'overview' : 'complete-guide')
+  if (semanticIssues.length) throw new Error(semanticIssues.join(','))
   const references = markdownReferences(text, manifestPaths)
   const invalid = references.find((reference) => reference.kind === 'invalid')
   if (invalid) throw new Error(`artifact-invalid-reference:${invalid.reference}`)

@@ -1077,3 +1077,11 @@ summary {
  .artifact-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
  .artifact-markdown th, .artifact-markdown td { padding: .55rem .7rem; border-bottom: 1px solid var(--line); text-align: left; }
  .artifact-markdown pre { overflow-x: auto; padding: 1rem; border-radius: .6rem; background: var(--code-bg); }
+ .report-v2 { max-width: 76rem; }
+ .report-v2 .lead { max-width: 62ch; font-size: 1.18rem; }
+ .report-glance { display: grid; grid-template-columns: minmax(0, 1fr); padding: 1rem 1.2rem; background: var(--surface-raised); border-radius: .75rem; }
+ .report-flow ol, .report-reading ol { display: grid; gap: .75rem; padding-left: 1.5rem; }
+ .report-flow li::marker, .report-reading li::marker { color: var(--accent); font-weight: 700; }
+ .report-gaps { margin-top: 2rem; padding: 1rem 1.2rem; border-left: 2px solid var(--accent); background: var(--surface-raised); }
+ .report-coverage { margin-top: 2rem; }
+ .report-contents { position: sticky; top: 1rem; z-index: 1; background: var(--page); padding: .5rem 0; }
