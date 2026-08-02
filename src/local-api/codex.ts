@@ -7,7 +7,7 @@ export const CODEX_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 240_000
 
 export interface CodexProbe { executable: string; version: string; signedIn: boolean; supportsModelOverride: boolean }
 export interface CodexRunResult { code: number | null; stdout: string; stderr: string; events: Record<string, unknown>[]; completed: boolean }
-export interface CodexRunOptions { cwd: string; input: string; model?: string; schemaPath: string; outputPath: string; signal?: AbortSignal; onProcess?: (child: ChildProcess) => void; onEvent?: (event: Record<string, unknown>) => void }
+export interface CodexRunOptions { cwd: string; input: string; model?: string; schemaPath?: string; outputPath: string; signal?: AbortSignal; onProcess?: (child: ChildProcess) => void; onEvent?: (event: Record<string, unknown>) => void }
 
 function candidates() {
   const names = process.platform === 'win32' ? ['codex.exe', 'codex.cmd', 'codex'] : ['codex']
@@ -50,7 +50,7 @@ export async function detectCodex(): Promise<CodexProbe | { error: string }> {
   return { error: 'Codex is unavailable. Start Codex Desktop or install the Codex CLI, then restart Project Lens.' }
 }
 
-export function codexArgs(workspace: string, model: string | undefined, schemaPath: string, outputPath: string) { return ['exec', '--json', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), '--output-schema', schemaPath, '--output-last-message', outputPath, '-C', workspace, '-'] }
+export function codexArgs(workspace: string, model: string | undefined, schemaPath: string | undefined, outputPath: string) { return ['exec', '--json', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), ...(schemaPath ? ['--output-schema', schemaPath] : []), '--output-last-message', outputPath, '-C', workspace, '-'] }
 
 export function parseCodexJson(text: string): unknown {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
