@@ -1071,3 +1071,4 @@ summary {
 .launcher-section-label { color: var(--muted); font-size: .76rem; font-weight: 700; letter-spacing: .08em; margin: 0; text-transform: uppercase; }
 .ai-ready, .local-support { color: var(--muted); margin: 0; }
 .ai-ready { color: var(--text); font-weight: 650; }
+ .artifact-markdown { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; margin: 1.25rem 0; }

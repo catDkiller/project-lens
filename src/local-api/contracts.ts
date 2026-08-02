@@ -6,8 +6,8 @@ export interface CodexStatusDto {
   error?: string
 }
 
-export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'workspace-ready' | 'enriching' | 'enriched' | 'enrichment-unavailable' | 'completed' | 'failed' | 'cancelled'
-export type AnalysisRunState = 'queued' | 'preparing-project' | 'workspace-ready' | 'enriching-with-codex' | 'enrichment-complete' | 'enrichment-unavailable' | 'completed' | 'cancelling' | 'cancelled' | 'failed'
+export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'workspace-ready' | 'enriching' | 'enriched' | 'enrichment-unavailable' | 'run_started' | 'thread_started' | 'status' | 'tool_call' | 'tool_result' | 'file_write' | 'warning' | 'artifact_ready' | 'completed' | 'failed' | 'cancelled'
+export type AnalysisRunState = 'queued' | 'preparing-project' | 'workspace-ready' | 'enriching-with-codex' | 'enrichment-complete' | 'enrichment-unavailable' | 'running' | 'artifact-ready' | 'completed' | 'cancelling' | 'cancelled' | 'failed'
 export type AnalysisFailureCode = 'codex-unavailable' | 'codex-sign-in-required' | 'codex-invocation-failed' | 'process-startup-failure' | 'output-invalid' | 'analysis-aborted' | 'unknown'
 
 export interface AnalysisEventDto {

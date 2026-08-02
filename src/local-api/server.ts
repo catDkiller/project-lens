@@ -1,25 +1,20 @@
 import { createServer } from 'node:http'
 import type { ChildProcess } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { appendFile, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { runProjectAnalysis } from '../analysis'
-import { PROJECT_EXPLANATION_PROMPT_VERSION, buildPresentationKnowledgeBase, createCodexEvidencePrompt, createProjectKnowledgeBase, parseCodexInsights, validatePresentationKnowledgeBase } from '../knowledge'
+import { buildPresentationKnowledgeBase, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto } from './contracts'
-import { changedFiles, fileManifest } from './analysisWorkspace'
-import { detectCodex, parseCodexJson, redact } from './codex'
-import { runCodexSdk } from './codexSdkRunner'
+import { redact } from './codex'
+import { buildCodexArgs, readRequiredArtifacts, resolveCodexCli, runCodexCli, stageRun } from './codexCli'
 import { acceptsLocalPath, classifyLocalPath, localProject, prepareLocalFiles, type LocalSkipReason } from '../project-sources/localFolderImport'
 import { assessLocalProject } from '../project-sources/support'
-import { createHash } from 'node:crypto'
 
 type Project = { id: string; name: string; framework: string; files: { path: string; content: string }[] }
-type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local' }
+type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local'; sourcePath?: string; runDirectory?: string; report?: PresentationKnowledgeBase }
 const runs = new Map<string, Run>()
-const baseCache = new Map<string, PresentationKnowledgeBase>()
-const enrichmentCache = new Map<string, PresentationKnowledgeBase>()
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
 export const daemonToken = process.env.PROJECT_LENS_API_TOKEN ?? randomUUID()
 const allowedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173', 'http://[::1]:5173'])
@@ -28,7 +23,7 @@ export function isAllowedDaemonRequest(origin: string | undefined, token: string
 function send(res: import('node:http').ServerResponse, status: number, body: unknown) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 function setState(run: Run, state: AnalysisRunState) { run.state = state; if (!run.startedAt && state !== 'queued') run.startedAt = new Date().toISOString() }
 function event(run: Run, next: AnalysisEventDto, genuine = false) { const timestamp = new Date().toISOString(); run.lastAnyEventAt = timestamp; if (genuine) run.lastGenuineAgentEventAt = timestamp; run.events.push({ ...next, timestamp }) }
-function status(run: Run): AnalysisRunStatusDto { const { controller: _controller, child: _child, project: _project, source: _source, ...result } = run; return result }
+function status(run: Run): AnalysisRunStatusDto { const { controller: _controller, child: _child, project: _project, source: _source, sourcePath: _sourcePath, runDirectory: _runDirectory, report: _report, ...result } = run; return result }
 function activeRun() { return [...runs.values()].find((run) => !run.terminalOutcome) }
 
 async function sampleProject() {
@@ -44,9 +39,6 @@ async function sampleProject() {
   return { id: 'prepared-sample', name: 'Prepared sample', framework: 'Software project', files: files.sort((left, right) => left.path.localeCompare(right.path)) }
 }
 
-function baseCacheKey(project: Project, fingerprint: string) { return JSON.stringify({ project: project.id, fingerprint, source: project.files.map((file) => file.path), analyser: 'deterministic-v1' }) }
-function enrichmentCacheKey(project: Project, version: string, fingerprint: string) { return JSON.stringify({ project: project.id, fingerprint, agent: 'codex', version, prompt: PROJECT_EXPLANATION_PROMPT_VERSION }) }
-function projectFingerprint(project: Project) { const hash = createHash('sha256'); for (const file of [...project.files].sort((left, right) => left.path.localeCompare(right.path))) hash.update(`\0${file.path}\0${file.content}`); return hash.digest('hex') }
 async function readLocalFolder(folder: string) {
   const root = await realpath(folder); const info = await stat(root)
   if (!info.isDirectory() || root === path.parse(root).root) throw new Error('Choose an existing project folder, not a drive root.')
@@ -60,46 +52,41 @@ async function readLocalFolder(folder: string) {
   }
   await visit(root)
   const prepared = prepareLocalFiles(candidates); const assessment = assessLocalProject(prepared.files)
-  return { name: path.basename(root), files: prepared.files, summary: `${prepared.files.length} relevant files`, projectType: assessment.projectType, skipped: Object.fromEntries(Object.keys(skippedByReason).map((key) => [key, skippedByReason[key as LocalSkipReason] + prepared.skippedByReason[key as LocalSkipReason]])) as Record<LocalSkipReason, number>, support: prepared.files.length ? assessment.support : 'failed' as const, diagnostics: assessment.evidence }
+  return { name: path.basename(root), canonicalPath: root, files: prepared.files, summary: `${prepared.files.length} relevant files`, projectType: assessment.projectType, skipped: Object.fromEntries(Object.keys(skippedByReason).map((key) => [key, skippedByReason[key as LocalSkipReason] + prepared.skippedByReason[key as LocalSkipReason]])) as Record<LocalSkipReason, number>, support: prepared.files.length ? assessment.support : 'failed' as const, diagnostics: assessment.evidence }
 }
+function sourceHash(files: Project['files']) { return createHash('sha256').update(files.map((file) => `${file.path}\0${file.content}\0`).join('')).digest('hex') }
+async function stagedSourceHash(source: string, files: Project['files']) { const snapshot = await Promise.all(files.map(async (file) => ({ path: file.path, content: await readFile(path.join(source, ...file.path.split('/')), 'utf8') }))); return sourceHash(snapshot) }
+async function writeRunMetadata(directory: string, values: Record<string, unknown>) { await writeFile(path.join(directory, 'run.json'), JSON.stringify(values, null, 2), 'utf8') }
 async function execute(run: Run) {
   const project = run.project ?? await sampleProject()
   setState(run, 'preparing-project'); event(run, { type: 'preparing-evidence', message: 'Inspecting the project structure.' })
   const analysis = await runProjectAnalysis(project, [], (stage, state) => { if (state === 'running') event(run, { type: 'preparing-evidence', message: `Checking ${stage}.` }) }, 0)
   const raw = createProjectKnowledgeBase(analysis, [], run.source ? 'Selected folder' : 'Prepared sample')
-  const fingerprint = projectFingerprint(project)
-  const baseKey = baseCacheKey(project, fingerprint)
-  const base = baseCache.get(baseKey) ?? buildPresentationKnowledgeBase(raw)
-  const baseIssues = validatePresentationKnowledgeBase(base, raw)
-  if (baseIssues.length || base.projectName !== project.name || base.sourceFingerprint !== raw.sourceFingerprint || base.files?.some((file) => !raw.importantFiles?.some((known) => known.path === file.path))) throw Object.assign(new Error(`Local analysis could not be validated: ${baseIssues.join('; ')}`), { code: 'output-invalid' })
-  baseCache.set(baseKey, base)
-  setState(run, 'workspace-ready'); event(run, { type: 'workspace-ready', result: base, message: 'Opened the local project workspace.' })
-  if (!run.model) { run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Local analysis is complete.' }); return }
-  const codex = await detectCodex()
-  if (!('executable' in codex) || !codex.signedIn) {
-    setState(run, 'enrichment-unavailable'); event(run, { type: 'enrichment-unavailable', message: 'AI explanations could not be added. Local project analysis is available.' }); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Local analysis is complete.' }); return
-  }
+  const codex = await resolveCodexCli()
+  if (!('executable' in codex)) throw Object.assign(new Error(codex.error), { code: 'codex-unavailable' })
+  if (!codex.signedIn) throw Object.assign(new Error('Sign in to Codex before analysing a project.'), { code: 'codex-sign-in-required' })
   run.codexVersion = codex.version
-  const enrichmentKey = enrichmentCacheKey(project, codex.version, fingerprint)
-  const cached = enrichmentCache.get(enrichmentKey)
-  if (cached) { setState(run, 'enrichment-complete'); event(run, { type: 'enriched', result: cached, message: 'Added verified AI explanations.' }); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Local analysis is complete.' }); return }
-  const workspace = await mkdtemp(path.join(tmpdir(), 'project-lens-codex-'))
+  const skill = await readFile(path.join(process.cwd(), 'skills', 'project-analysis', 'SKILL.md'), 'utf8')
+  const staged = await stageRun(process.cwd(), run.runId, project.files, skill)
+  run.runDirectory = staged.directory
+  const metadata: Record<string, unknown> = { runId: run.runId, selectedFolder: run.sourcePath ?? 'prepared sample', projectName: project.name, sourceFingerprint: raw.sourceFingerprint, sourceSnapshotHash: sourceHash(project.files), includedFileCount: project.files.length, skippedFileCount: 0, includedByteCount: project.files.reduce((total, file) => total + Buffer.byteLength(file.content), 0), detectedLanguages: raw.detectedLanguages, startedAt: run.createdAt, codex: { executable: codex.executable, version: codex.version, model: run.model ?? 'automatic' }, state: 'running', artifactState: 'pending' }
+  await writeRunMetadata(staged.directory, metadata)
   try {
-    const baseline = await fileManifest(workspace)
-    setState(run, 'enriching-with-codex'); event(run, { type: 'enriching', message: 'Adding optional Codex explanations.' })
-    const result = await runCodexSdk({ executable: codex.executable, workingDirectory: workspace, model: undefined, prompt: createCodexEvidencePrompt(raw), signal: run.controller.signal })
-    event(run, { type: 'enriching', message: 'Codex returned the project explanation.' }, true)
-    if (changedFiles(baseline, await fileManifest(workspace)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
-    let text = result.finalResponse.slice(0, 1_000_000); let insights: import('../knowledge').CodexInsightResponse | undefined; let issues: string[]
-    try { const parsed = parseCodexInsights(parseCodexJson(text), raw); insights = parsed.insights; issues = parsed.issues } catch { issues = ['insight: malformed output'] }
-    const output = buildPresentationKnowledgeBase(raw, insights)
+    setState(run, 'running'); event(run, { type: 'run_started', message: 'Starting Codex in the isolated run workspace.' })
+    const eventsPath = path.join(staged.directory, 'events.jsonl')
+    const child = runCodexCli({ executable: codex.executable, args: buildCodexArgs(staged.directory, run.model), cwd: staged.directory, prompt: 'Read skill/SKILL.md, inspect source/, and write artifacts/overview.md and artifacts/complete-guide.md. Finish only after verifying the artifacts.', signal: run.controller.signal, onEvent: (received) => { if (received.threadId) metadata.codexThreadId = received.threadId; const message = received.message?.slice(0, 500); void appendFile(eventsPath, `${JSON.stringify({ ...received, raw: undefined })}\n`, 'utf8'); const types: Record<string, AnalysisEventDto['type']> = { thread_started: 'thread_started', status: 'status', tool_call: 'tool_call', tool_result: 'tool_result', file_write: 'file_write', warning: 'warning' }; event(run, { type: types[received.type] ?? 'status', message: message || received.type }, received.type === 'tool_call' || received.type === 'tool_result' || received.type === 'file_write') } })
+    const result = await child
+    if (run.cancellationRequested) throw Object.assign(new Error('Analysis was cancelled.'), { code: 'analysis-aborted', exitCode: result.code })
+    if (result.code !== 0) throw Object.assign(new Error(`Codex exited with code ${result.code}.`), { code: 'codex-invocation-failed', exitCode: result.code, stderr: result.stderr })
+    if (await stagedSourceHash(staged.source, project.files) !== metadata.sourceSnapshotHash) throw Object.assign(new Error('Codex modified the protected source snapshot.'), { code: 'source-mismatch' })
+    const artifacts = await readRequiredArtifacts(staged.artifacts, new Set(project.files.map((file) => file.path)))
+    const baseOutput = buildPresentationKnowledgeBase(raw)
+    const output: PresentationKnowledgeBase = { ...baseOutput, overviewMarkdown: artifacts['overview.md'], completeGuideMarkdown: artifacts['complete-guide.md'], shortSummary: artifacts['overview.md'].slice(0, 500), overview: { ...baseOutput.overview, whatItIs: artifacts['overview.md'].slice(0, 2_000) }, sections: [{ id: 'complete-guide-artifact', title: 'Complete Guide', shortExplanation: artifacts['complete-guide.md'].slice(0, 8_000) }, ...(baseOutput.sections ?? [])] }
     const presentationIssues = validatePresentationKnowledgeBase(output, raw)
-    if (issues.length || presentationIssues.length) throw Object.assign(new Error(`Codex output could not be validated: ${[...issues, ...presentationIssues].join('; ')}`), { code: 'output-invalid' })
+    if (presentationIssues.length) throw Object.assign(new Error(`Analysis artifacts could not be validated: ${presentationIssues.join('; ')}`), { code: 'output-invalid' })
     if (output.projectName !== project.name || output.sourceFingerprint !== raw.sourceFingerprint || output.files?.some((file) => !raw.importantFiles?.some((known) => known.path === file.path))) throw Object.assign(new Error('Generated workspace does not match the selected folder.'), { code: 'source-mismatch' })
-    enrichmentCache.set(enrichmentKey, output); setState(run, 'enrichment-complete'); event(run, { type: 'enriched', result: output, message: 'Added verified AI explanations.' })
-  } catch {
-    setState(run, 'enrichment-unavailable'); event(run, { type: 'enrichment-unavailable', message: 'AI explanations could not be added. Local project analysis is available.' })
-  } finally { await rm(workspace, { recursive: true, force: true, maxRetries: 3 }); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Local analysis is complete.' }) }
+    run.report = output; metadata.state = 'artifact-ready'; metadata.artifactState = 'validated'; metadata.terminalResult = 'completed'; setState(run, 'artifact-ready'); event(run, { type: 'artifact_ready', result: output, message: 'Analysis artifacts validated.' }); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Analysis complete.' })
+  } finally { metadata.state = run.state; metadata.terminalResult = run.terminalOutcome; await writeRunMetadata(staged.directory, metadata) }
 }
 
 function fail(run: Run, error: unknown) { if (run.terminalOutcome) return; const cancelled = error instanceof Error && /cancelled/i.test(error.message); const detail = error as { code?: AnalysisEventDto['diagnostic'] extends { code?: infer Code } ? Code : never; exitCode?: number }; run.terminalOutcome = cancelled ? 'cancelled' : 'failed'; setState(run, cancelled ? 'cancelled' : 'failed'); event(run, { type: cancelled ? 'cancelled' : 'failed', error: cancelled ? 'Analysis was cancelled.' : error instanceof Error ? error.message : 'Analysis failed.', diagnostic: { code: detail?.code ?? 'unknown', exitCode: detail?.exitCode, stderr: error instanceof Error ? redact(error.message) : undefined, codexVersion: run.codexVersion } }) }
@@ -111,27 +98,29 @@ export const daemon = createServer(async (req, res) => {
   const origin = req.headers.origin
   if (origin && !allowedOrigins.has(origin)) return send(res, 403, { error: 'origin-not-allowed' })
   if (!isAllowedDaemonRequest(origin, req.headers['x-project-lens-token'] as string | undefined) && url.searchParams.get('token') !== daemonToken) return send(res, 401, { error: 'invalid-daemon-token' })
-  if (req.method === 'GET' && url.pathname === '/api/codex/status') { const result = await detectCodex(); return 'executable' in result ? send(res, 200, { status: result.signedIn ? 'ready' : 'sign-in-required', version: result.version }) : send(res, 503, { status: 'unavailable', error: result.error }) }
+  if (req.method === 'GET' && url.pathname === '/api/codex/status') { const result = await resolveCodexCli(); return 'executable' in result ? send(res, 200, { status: result.signedIn ? 'ready' : 'sign-in-required', version: result.version }) : send(res, 503, { status: 'unavailable', error: result.error }) }
   if (req.method === 'POST' && url.pathname === '/api/source/local-path') {
     try { const parsed = JSON.parse(await body(req, 20_000)) as { path?: string }; if (typeof parsed.path !== 'string' || !parsed.path.trim()) return send(res, 400, { error: 'Enter a local project folder path.' }); return send(res, 200, await readLocalFolder(parsed.path.trim())) } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'The folder could not be prepared locally.' }) }
   }
-  if (req.method === 'POST' && (url.pathname === '/api/analysis/sample' || url.pathname === '/api/analysis/local')) {
+  if (req.method === 'POST' && (url.pathname === '/api/analysis/sample' || url.pathname === '/api/analysis/local' || url.pathname === '/api/runs')) {
     if (activeRun()) return send(res, 409, { error: 'An analysis is already running.' })
     try {
-      const parsed = JSON.parse(await body(req, 14_000_000)) as { name?: string; projectType?: string; files?: { path: string; content: string }[]; model?: string; enrich?: boolean }
-      const local = url.pathname.endsWith('/local')
+      const parsed = JSON.parse(await body(req, 14_000_000)) as { name?: string; projectType?: string; files?: { path: string; content: string }[]; model?: string; sourcePath?: string }
+      const local = url.pathname.endsWith('/local') || (url.pathname === '/api/runs' && Array.isArray(parsed.files))
       const project = local ? localProject(parsed.name ?? 'Local project', prepareLocalFiles((parsed.files ?? []).map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength }))).files, parsed.projectType ?? 'Software project') : undefined
       if (local && !project?.files.length) return send(res, 400, { error: 'No supported project text files were included.' })
-      const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: parsed.enrich ? 'automatic' : undefined, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined }
+      const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: typeof parsed.model === 'string' ? parsed.model : undefined, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined, sourcePath: local && typeof parsed.sourcePath === 'string' ? parsed.sourcePath : undefined }
       runs.set(run.runId, run); event(run, { type: 'queued', message: 'Preparing the project.' }); void execute(run).catch((error) => fail(run, error)); return send(res, 202, { runId: run.runId })
     } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Invalid analysis request.' }) }
   }
-  const match = url.pathname.match(/^\/api\/analysis\/([^/]+)(?:\/(events|cancel))?$/)
+  const match = url.pathname.match(/^\/api\/(?:analysis|runs)\/([^/]+)(?:\/(events|cancel|report|files))?$/)
   if (match) {
     const run = runs.get(match[1]); if (!run) return send(res, 404, { error: 'run-not-found' })
     if (!match[2] && req.method === 'GET') return send(res, 200, status(run))
+    if (match[2] === 'report' && req.method === 'GET') return run.report ? send(res, 200, run.report) : send(res, 409, { error: 'report-not-ready' })
+    if (match[2] === 'files' && req.method === 'GET') return send(res, 200, { files: run.project?.files.map((file) => file.path) ?? [] })
     if (match[2] === 'cancel' && req.method === 'POST') { run.cancellationRequested = true; setState(run, 'cancelling'); event(run, { type: 'preparing-evidence', message: 'Cancellation requested.' }); run.controller.abort(); return send(res, 202, { runId: run.runId, status: 'cancelling' }) }
-    if (match[2] === 'events' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); let index = 0; const timer = setInterval(() => { while (index < run.events.length) { const current = run.events[index++]; res.write(`event: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) { clearInterval(timer); res.end(); return } } }, 100); req.on('close', () => clearInterval(timer)); return }
+    if (match[2] === 'events' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', connection: 'keep-alive' }); let index = 0; const timer = setInterval(() => { if (index === run.events.length) res.write(': keepalive\n\n'); while (index < run.events.length) { const current = run.events[index++]; res.write(`event: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) { clearInterval(timer); res.end(); return } } }, 1000); req.on('close', () => clearInterval(timer)); return }
   }
   send(res, 404, { error: 'Not found.' })
 })

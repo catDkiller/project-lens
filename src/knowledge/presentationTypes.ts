@@ -74,4 +74,6 @@ export interface PresentationKnowledgeBase {
   learningPath?: PresentationItem[]
   limitations?: PresentationSection
   technicalReference?: PresentationSection[]
+  overviewMarkdown?: string
+  completeGuideMarkdown?: string
 }

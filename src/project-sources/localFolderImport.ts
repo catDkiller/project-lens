@@ -1,6 +1,6 @@
 import type { NormalizedProject, ProjectFile } from './types'
 
-const ignoredDirectories = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.cache'])
+const ignoredDirectories = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.cache', '.project-lens', 'open-design-ui-prototype', 'project-audit', '.venv', 'venv', 'vendor'])
 const fixtureDirectory = /(^|[-_])(fixture|fixtures|sample|samples|mock|mocks)([-_]|$)/i
 const textExtensions = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.css', '.scss', '.less', '.json', '.html', '.htm', '.md', '.txt', '.svg', '.py', '.java', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.cs', '.go', '.rs', '.rb', '.php', '.sh', '.bash', '.sql', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.xml', '.ipynb'])
 const secretName = /(^|\/)(\.env(?:\..*)?|.*\.(pem|key|p12)|auth\.json)$/i
