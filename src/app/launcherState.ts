@@ -7,7 +7,7 @@ export const privacyDescription = 'Files are prepared locally. Relevant project 
 export function deriveLauncherState(codex: CodexStatusDto | undefined, source: LauncherSource, model: ModelChoice, reading = false): CanonicalLauncherState {
   const engine = !codex || codex.status === 'checking' ? { status: 'checking' as const, displayName: 'Codex' } : codex.status === 'ready' ? { status: 'ready' as const, displayName: 'Codex' } : { status: codex.status === 'unavailable' ? 'unavailable' as const : 'needs-action' as const, displayName: 'Codex', recovery: codex.status === 'sign-in-required' ? 'Sign in to Codex to analyse a project.' : codex.error ?? 'Codex is unavailable.' }
   const sourceProblem = source?.kind === 'local' && source.support !== 'supported' ? source.support : undefined
-  const view = reading ? 'READING_SOURCE' : !source ? 'EMPTY' : sourceProblem === 'failed' ? 'SOURCE_FAILED' : sourceProblem === 'too-large' ? 'SOURCE_TOO_LARGE' : engine.status === 'checking' ? 'ENGINE_CHECKING' : engine.status === 'ready' ? 'READY' : 'ENGINE_NEEDS_ACTION'
-  const disabledReason = view === 'READY' ? undefined : view === 'EMPTY' ? 'Choose a project or use the prepared sample.' : view === 'READING_SOURCE' ? 'Reading the selected project.' : engine.recovery ?? 'This project cannot be analysed yet.'
+  const view = reading ? 'READING_SOURCE' : !source ? 'EMPTY' : sourceProblem === 'failed' ? 'SOURCE_FAILED' : sourceProblem === 'too-large' ? 'SOURCE_TOO_LARGE' : 'READY'
+  const disabledReason = view === 'READY' ? undefined : view === 'EMPTY' ? 'Choose a project or use the prepared sample.' : view === 'READING_SOURCE' ? 'Reading the selected project.' : 'This project cannot be analysed yet.'
   return { source, engine, model, view, canAnalyse: view === 'READY', disabledReason, privacyDescription }
 }

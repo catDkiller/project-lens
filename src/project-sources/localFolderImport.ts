@@ -1,6 +1,7 @@
 import type { NormalizedProject, ProjectFile } from './types'
 
 const ignoredDirectories = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '.next', '.cache'])
+const fixtureDirectory = /(^|[-_])(fixture|fixtures|sample|samples|mock|mocks)([-_]|$)/i
 const textExtensions = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.css', '.scss', '.less', '.json', '.html', '.htm', '.md', '.txt', '.svg', '.py', '.java', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.cs', '.go', '.rs', '.rb', '.php', '.sh', '.bash', '.sql', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.xml', '.ipynb'])
 const secretName = /(^|\/)(\.env(?:\..*)?|.*\.(pem|key|p12)|auth\.json)$/i
 const MAX_FILE_BYTES = 512_000
@@ -22,7 +23,7 @@ export function acceptsLocalPath(value: string, size: number) {
 export function classifyLocalPath(value: string, size: number): LocalSkipReason | null {
   const path = safeRelativePath(value); const extension = path?.slice(path.lastIndexOf('.')).toLowerCase() ?? ''
   if (!path) return 'unsafe'
-  if (path.split('/').some((part) => ignoredDirectories.has(part))) return 'dependency-generated'
+  if (path.split('/').some((part) => ignoredDirectories.has(part) || fixtureDirectory.test(part))) return 'dependency-generated'
   if (secretName.test(path)) return 'sensitive'
   if (size > MAX_FILE_BYTES) return 'oversized'
   if (!textExtensions.has(extension)) return 'binary-unsupported'

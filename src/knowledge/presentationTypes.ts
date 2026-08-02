@@ -62,6 +62,7 @@ export interface PresentationProjectPart extends PresentationSection {
 
 export interface PresentationKnowledgeBase {
   version: '1.0'
+  sourceFingerprint?: string
   projectName: string
   projectTypeLabel?: string
   shortSummary?: string

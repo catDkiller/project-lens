@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { localFolderProjectSource } from '../src/project-sources/LocalFolderProjectSource'
-import { acceptsLocalPath, prepareLocalFiles, safeRelativePath } from '../src/project-sources/localFolderImport'
+import { acceptsLocalPath, classifyLocalPath, prepareLocalFiles, safeRelativePath } from '../src/project-sources/localFolderImport'
 
 describe('local project import', () => {
   it('keeps safe nested text files in deterministic order', async () => {
@@ -39,5 +39,10 @@ describe('local project import', () => {
     ])
     expect(prepared.skippedByReason).toMatchObject({ 'dependency-generated': 1, sensitive: 1, 'binary-unsupported': 1 })
     expect(JSON.stringify(prepared)).not.toContain('SECRET=value')
+  })
+
+  it('keeps bundled samples and fixtures out of a selected project snapshot', () => {
+    expect(classifyLocalPath('prepared-sample-project/src/App.tsx', 10)).toBe('dependency-generated')
+    expect(classifyLocalPath('src/fixtures/example.ts', 10)).toBe('dependency-generated')
   })
 })
