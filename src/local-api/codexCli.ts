@@ -10,15 +10,18 @@ import path from 'node:path'
 const require = createRequire(import.meta.url)
 export type CodexRuntimeEvent = { type: 'thread_started' | 'status' | 'reasoning' | 'text_delta' | 'tool_call' | 'tool_result' | 'file_write' | 'usage' | 'warning' | 'error' | 'process_exited'; message?: string; threadId?: string; raw?: Record<string, unknown> }
 export type CodexCliProbe = { executable: string; version: string; signedIn: boolean; models: string[] }
+export type ArtifactReferenceClassification = { kind: 'source-file' | 'runtime-generated' | 'external' | 'unverified'; reference: string; normalized?: string; evidence?: string }
 export function normalizeArtifactPath(value: string, manifestPaths: Iterable<string>): string | null {
   const cleaned = value.trim().replace(/^[`'"([<{]+|[`'">)}.,;:!?]+$/g, '').replaceAll('\\', '/').replace(/^\.\//, '').replace(/^source\//i, '').replace(/\/+/g, '/')
   if (!cleaned || [...cleaned].some((character) => character.charCodeAt(0) < 32) || cleaned.startsWith('/') || cleaned.startsWith('//') || /^[a-z]:\//i.test(cleaned) || cleaned.split('/').some((part) => part === '..')) return null
   const target = cleaned.split('/').filter((part) => part && part !== '.').join('/')
+  if (/^(models|output|logs|\.cache|cache)\//i.test(target) || /\.(task|log)$/i.test(target)) return target
   const paths = [...manifestPaths]; const compare = (path: string) => process.platform === 'win32' ? path.toLowerCase() === target.toLowerCase() : path === target
   const matched = paths.find(compare); if (matched) return matched
   const suffixes = paths.filter((path) => (process.platform === 'win32' ? path.toLowerCase().endsWith(`/${target.toLowerCase()}`) : path.endsWith(`/${target}`)))
   return suffixes.length === 1 ? suffixes[0] : null
 }
+export function classifyArtifactReference(reference: string, context: string, manifestPaths: Iterable<string>): ArtifactReferenceClassification { const normalized = normalizeArtifactPath(reference, manifestPaths); const lower = context.toLowerCase(); if (/^(https?:|git@|npm:)/i.test(reference.trim())) return { kind: 'external', reference }; if (/download|generated|created|saved|cache|output|model asset|runtime dependency|first run/.test(lower)) return { kind: 'runtime-generated', reference, normalized: normalized ?? reference.replaceAll('\\', '/').replace(/^\.?(\/)?source\//i, ''), evidence: context.slice(0, 240) }; if (normalized) return { kind: 'source-file', reference, normalized }; return { kind: 'unverified', reference, normalized: reference.replaceAll('\\', '/') } }
 
 async function command(executable: string, args: string[]) { return await new Promise<{ code: number | null; stdout: string }>((resolve) => { const child = spawn(executable, args, { shell: false, windowsHide: true }); let stdout = ''; child.stdout.on('data', (chunk: Buffer) => { stdout = (stdout + chunk).slice(0, 2_000_000) }); child.once('error', () => resolve({ code: null, stdout })); child.once('close', (code) => resolve({ code, stdout })) }) }
 export async function resolveCodexCli(): Promise<CodexCliProbe | { error: string }> {
