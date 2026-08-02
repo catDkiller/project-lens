@@ -1,24 +1,34 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { spawn } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
 
 const MAX_OUTPUT = 1_000_000
-export const CODEX_TIMEOUTS = { processStartMs: 30_000, firstResponseMs: 240_000, inactivityMs: 120_000, totalRunMs: 600_000 }
+const require = createRequire(import.meta.url)
 
-export interface CodexProbe { executable: string; version: string; signedIn: boolean; supportsModelOverride: boolean }
-export interface CodexRunResult { code: number | null; stdout: string; stderr: string; events: Record<string, unknown>[]; completed: boolean }
-export interface CodexRunOptions { cwd: string; input: string; model?: string; schemaPath?: string; outputPath: string; signal?: AbortSignal; onProcess?: (child: ChildProcess) => void; onEvent?: (event: Record<string, unknown>) => void }
-
-function candidates() {
-  const names = process.platform === 'win32' ? ['codex.exe', 'codex.cmd', 'codex'] : ['codex']
-  const entries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)
-  const known = process.platform === 'win32' ? [path.join(process.env.USERPROFILE ?? '', '.codex', 'plugins', '.plugin-appserver'), path.join(process.env.USERPROFILE ?? '', '.codex', '.sandbox-bin')] : []
-  return [...known, ...entries].flatMap((entry) => names.map((name) => path.join(entry, name)))
+export interface CodexProbe {
+  executable: string
+  version: string
+  signedIn: boolean
 }
 
-async function command(executable: string, args: string[]) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-    let child: ChildProcess
+type CommandResult = { code: number | null; stdout: string; stderr: string }
+
+function officialCandidates() {
+  const candidates: string[] = []
+  try {
+    const packageJson = require.resolve('@openai/codex-win32-x64/package.json')
+    candidates.push(path.join(path.dirname(packageJson), 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe'))
+  } catch { /* another platform or optional package not installed */ }
+  if (process.platform === 'win32') candidates.push(path.join(process.env.USERPROFILE ?? '', '.codex', 'packages', 'standalone', 'current', 'bin', 'codex.exe'))
+  const names = process.platform === 'win32' ? ['codex.exe', 'codex.cmd', 'codex'] : ['codex']
+  for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) for (const name of names) candidates.push(path.join(entry, name))
+  return [...new Set(candidates)].filter((candidate) => !candidate.toLowerCase().includes(`${path.sep}.codex${path.sep}plugins${path.sep}.plugin-appserver${path.sep}`))
+}
+
+async function command(executable: string, args: string[]): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>
     try { child = spawn(executable, args, { shell: false, windowsHide: true }) } catch { resolve({ code: null, stdout: '', stderr: 'Codex could not start.' }); return }
     let stdout = ''; let stderr = ''; let settled = false
     const finish = (code: number | null) => { if (!settled) { settled = true; resolve({ code, stdout, stderr }) } }
@@ -29,28 +39,21 @@ async function command(executable: string, args: string[]) {
 }
 
 export async function detectCodex(): Promise<CodexProbe | { error: string }> {
-  for (const candidate of candidates()) {
-    try { await access(candidate) } catch { continue }
-    const version = await command(candidate, ['--version'])
-    const help = await command(candidate, ['exec', '--help'])
+  let firstValid: CodexProbe | undefined
+  for (const executable of officialCandidates()) {
+    try { await access(executable) } catch { continue }
+    const [version, help, login] = await Promise.all([command(executable, ['--version']), command(executable, ['exec', '--help']), command(executable, ['login', 'status'])])
     if (version.code !== 0 || help.code !== 0 || !/--json/.test(help.stdout) || !/--ephemeral/.test(help.stdout) || !/read-only/.test(help.stdout)) continue
-    const supportsModelOverride = /--model\s+<MODEL>/i.test(help.stdout)
-    const login = await command(candidate, ['login', 'status'])
-    if (login.code === 0) return { executable: candidate, version: version.stdout.trim(), signedIn: true, supportsModelOverride }
-    // Keep looking: a stale bundled binary may be present before the user's authenticated CLI.
-    const fallback = { executable: candidate, version: version.stdout.trim(), signedIn: false }
-    const remaining = candidates().slice(candidates().indexOf(candidate) + 1)
-    for (const next of remaining) {
-      try { await access(next) } catch { continue }
-      const nextVersion = await command(next, ['--version']); const nextHelp = await command(next, ['exec', '--help']); const nextLogin = await command(next, ['login', 'status'])
-      if (nextVersion.code === 0 && nextHelp.code === 0 && /--json/.test(nextHelp.stdout) && /--ephemeral/.test(nextHelp.stdout) && /read-only/.test(nextHelp.stdout) && nextLogin.code === 0) return { executable: next, version: nextVersion.stdout.trim(), signedIn: true, supportsModelOverride: /--model\s+<MODEL>/i.test(nextHelp.stdout) }
-    }
-    return { ...fallback, supportsModelOverride }
+    const probe = { executable, version: version.stdout.trim(), signedIn: login.code === 0 }
+    firstValid ??= probe
+    if (probe.signedIn) return probe
   }
-  return { error: 'Codex is unavailable. Start Codex Desktop or install the Codex CLI, then restart Project Lens.' }
+  return firstValid ?? { error: 'Codex is unavailable. Install the official Codex CLI, then restart Project Lens.' }
 }
 
-export function codexArgs(workspace: string, model: string | undefined, schemaPath: string | undefined, outputPath: string) { return ['exec', '--json', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check', ...(model ? ['--model', model] : []), ...(schemaPath ? ['--output-schema', schemaPath] : []), '--output-last-message', outputPath, '-C', workspace, '-'] }
+export function sanitizedCodexEnvironment() {
+  return Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined && key !== 'CODEX_API_KEY' && key !== 'OPENAI_API_KEY')) as Record<string, string>
+}
 
 export function parseCodexJson(text: string): unknown {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
@@ -61,22 +64,7 @@ export function parseCodexJson(text: string): unknown {
   }
 }
 
-export async function runCodex(executable: string, options: CodexRunOptions): Promise<CodexRunResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, codexArgs(options.cwd, options.model, options.schemaPath, options.outputPath), { cwd: options.cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
-    options.onProcess?.(child)
-    let stdout = ''; let stderr = ''; const events: Record<string, unknown>[] = []; let buffer = ''; let completed = false; let settled = false
-    const done = (code: number | null) => { if (!settled) { settled = true; resolve({ code, stdout, stderr, events, completed }) } }
-    const consume = (chunk: Buffer) => {
-      stdout = (stdout + chunk).slice(0, MAX_OUTPUT); buffer += chunk.toString('utf8')
-      const lines = buffer.split(/\r?\n/); buffer = lines.pop() ?? ''
-      for (const line of lines) try { const event = JSON.parse(line) as Record<string, unknown>; events.push(event); if (event.type === 'turn.completed') completed = true; options.onEvent?.(event) } catch { /* unknown stdout is retained for diagnostics */ }
-    }
-    child.stdout?.on('data', consume); child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk).slice(0, MAX_OUTPUT) })
-    child.once('error', reject); child.once('close', done)
-    options.signal?.addEventListener('abort', () => { child.kill(); reject(new Error('Analysis cancelled.')) }, { once: true })
-    child.stdin?.end(options.input)
-  })
+export function redact(value: string) {
+  const escape = String.fromCharCode(27)
+  return value.replace(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, 'g'), '').replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500)
 }
-
-export function redact(value: string) { const escape = String.fromCharCode(27); return value.replace(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, 'g'), '').replace(/(api[_-]?key|token|password)\s*[:=]\s*\S+/gi, '$1=[redacted]').slice(0, 500) }

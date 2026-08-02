@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { codexArgs, parseCodexJson } from '../src/local-api/codex'
+import { parseCodexJson, sanitizedCodexEnvironment } from '../src/local-api/codex'
 
-describe('Codex execution contract', () => {
-  it('uses the verified model override and keeps automatic model-free', () => {
-    expect(codexArgs('C:/tmp/lens', 'gpt-5.4-mini', undefined, 'C:/tmp/output.json')).toContain('--model')
-    expect(codexArgs('C:/tmp/lens', 'gpt-5.4-mini', undefined, 'C:/tmp/output.json')).toContain('gpt-5.4-mini')
-    expect(codexArgs('C:/tmp/lens', undefined, undefined, 'C:/tmp/output.json')).not.toContain('--model')
-    expect(codexArgs('C:/tmp/lens', 'gpt-5.4', undefined, 'C:/tmp/output.json')).not.toContain('--output-schema')
-    expect(codexArgs('C:/tmp/lens', 'gpt-5.4', 'C:/tmp/schema.json', 'C:/tmp/output.json')).toEqual(expect.arrayContaining(['--output-schema', 'C:/tmp/schema.json', '--output-last-message', 'C:/tmp/output.json']))
+describe('Codex boundary', () => {
+  it('removes API-key environment variables before SDK construction', () => {
+    const previousApi = process.env.OPENAI_API_KEY
+    const previousCodex = process.env.CODEX_API_KEY
+    process.env.OPENAI_API_KEY = 'secret'
+    process.env.CODEX_API_KEY = 'secret'
+    const environment = sanitizedCodexEnvironment()
+    expect(environment.OPENAI_API_KEY).toBeUndefined()
+    expect(environment.CODEX_API_KEY).toBeUndefined()
+    if (previousApi === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousApi
+    if (previousCodex === undefined) delete process.env.CODEX_API_KEY; else process.env.CODEX_API_KEY = previousCodex
   })
 
-  it('accepts JSON returned directly or in a markdown fence', () => {
+  it('accepts direct, fenced and surrounded JSON', () => {
     expect(parseCodexJson('{"ok":true}')).toEqual({ ok: true })
     expect(parseCodexJson('```json\n{"ok":true}\n```')).toEqual({ ok: true })
     expect(parseCodexJson('Here is the result:\n{"ok":true}')).toEqual({ ok: true })
