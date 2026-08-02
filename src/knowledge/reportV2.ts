@@ -21,7 +21,7 @@ export function validateSemanticReportV2(text: string, mode: ReportMode): string
   if (!isSemanticReportV2(text, mode)) return []
   const report = parseSemanticReportV2(text, mode); const issues: string[] = []
   if (!report?.title) issues.push(`${mode}-v2-missing-h1`)
-  if (!report?.introduction) issues.push(`${mode}-v2-missing-introduction`)
+  if (mode === 'overview' && !report?.introduction) issues.push(`${mode}-v2-missing-introduction`)
   const headings = new Set(report?.sections.map((section) => section.id) ?? [])
   for (const name of required[mode]) if (!headings.has(slug(name))) issues.push(`${mode}-v2-missing-${slug(name)}`)
   return issues

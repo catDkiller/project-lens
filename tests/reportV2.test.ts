@@ -33,4 +33,19 @@ describe('semantic report V2', () => {
   it('returns precise missing-section diagnostics', () => {
     expect(validateSemanticReportV2('<!-- project-lens:overview:v2 -->\n# Missing\n> Intro', 'overview')).toContain('overview-v2-missing-project-areas')
   })
+  it('accepts a complete guide that starts its explanation at the first required section', () => {
+    const guide = `<!-- project-lens:complete-guide:v2 -->
+# Image pipeline Complete Guide
+## Mental model
+The project processes images.
+## Architecture or execution flow
+1. Load input.
+## Project areas
+Processing.
+## File walkthrough
+\`main.py\`
+## Suggested learning order
+1. Read the entrypoint.`
+    expect(validateSemanticReportV2(guide, 'complete-guide')).toEqual([])
+  })
 })
