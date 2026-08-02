@@ -1,5 +1,3 @@
-const source = import.meta.env.VITE_DEMO_VIDEO_URL || '/media/project-lens-demo.mp4'
-
 export function DemoVideo() {
   return <section className="demo-video reveal" id="demo" aria-labelledby="demo-title">
     <div className="section-intro">
@@ -11,6 +9,5 @@ export function DemoVideo() {
       <span>Demo video</span>
       <p>Available soon</p>
     </div>
-    <video className="video-probe" src={source} preload="metadata" aria-hidden="true" />
   </section>
 }

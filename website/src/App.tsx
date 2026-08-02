@@ -27,14 +27,14 @@ export function App() {
         gsap.set('.hero-video', { filter: 'brightness(1) saturate(1)' })
         gsap.timeline({
           scrollTrigger: {
-            id: 'hero-sea-transition', trigger: '.hero-stage', start: 'top top', end: '+=165%', pin: true, scrub: 1.05,
+            id: 'hero-sea-transition', trigger: '.hero-stage', start: 'top top', end: '+=75%', pin: true, scrub: 1.05,
           },
         })
-          .to('.hero-shade', { opacity: 0.93, ease: 'none' }, 0)
-          .to('.hero-video', { scale: 1.045, filter: 'brightness(.34) saturate(.58)', ease: 'none' }, 0)
-          .to('.hero-copy', { yPercent: -16, autoAlpha: 0.18, ease: 'none' }, 0.3)
-          .to('.hero-afterglow', { autoAlpha: 1, ease: 'none' }, 0.58)
-          .to('.hero-video', { autoAlpha: 0, ease: 'none' }, 0.82)
+          .to('.hero-shade', { opacity: 0.93, duration: 1, ease: 'none' }, 0)
+          .to('.hero-video', { scale: 1.045, filter: 'brightness(.34) saturate(.58)', duration: 0.95, ease: 'none' }, 0)
+          .to('.hero-copy', { yPercent: -16, autoAlpha: 0.18, duration: 0.75, ease: 'none' }, 0.22)
+          .to('.hero-afterglow', { autoAlpha: 1, duration: 0.42, ease: 'none' }, 0.55)
+          .to('.hero-video', { autoAlpha: 0, duration: 0.18, ease: 'none' }, 0.82)
       }
       gsap.utils.toArray<HTMLElement>('.reveal').forEach((element) => gsap.from(element, {
         y: 22, autoAlpha: 0, duration: 0.65, ease: 'power2.out', scrollTrigger: { trigger: element, start: 'top 84%', once: true },
