@@ -1,6 +1,6 @@
 import type { CodexStatusDto } from '../local-api/contracts'
 
-export type ModelChoice = 'gpt-5.4-mini' | 'gpt-5.4' | 'automatic'
+export type ModelChoice = string | 'automatic'
 export type LauncherSource = { kind: 'prepared'; projectType?: string } | { kind: 'local'; name: string; summary?: string; projectType?: string; support: 'supported' | 'too-large' | 'failed'; diagnostics?: string[] } | undefined
 export interface CanonicalLauncherState { source: LauncherSource; engine: { status: 'checking' | 'ready' | 'needs-action' | 'unavailable'; displayName: string; recovery?: string }; model: ModelChoice; canAnalyse: boolean; disabledReason?: string; view: 'EMPTY' | 'READING_SOURCE' | 'READY' | 'SOURCE_FAILED' | 'SOURCE_TOO_LARGE' | 'ENGINE_CHECKING' | 'ENGINE_NEEDS_ACTION'; privacyDescription: string }
 export const privacyDescription = 'Files are prepared locally. Relevant project text may be sent to Codex using your existing ChatGPT sign-in. Sensitive and ignored files are excluded.'

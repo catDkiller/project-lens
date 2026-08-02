@@ -38,6 +38,14 @@ async function sampleProject() {
   await visit(sampleRoot)
   return { id: 'prepared-sample', name: 'Prepared sample', framework: 'Software project', files: files.sort((left, right) => left.path.localeCompare(right.path)) }
 }
+async function projectFromSnapshot(directory: string, name: string) {
+  const files: Project['files'] = []
+  async function visit(current: string) { for (const entry of await readdir(current, { withFileTypes: true })) { const absolute = path.join(current, entry.name); if (entry.isDirectory()) await visit(absolute); else if (entry.isFile()) { try { files.push({ path: path.relative(directory, absolute).replaceAll('\\', '/'), content: await readFile(absolute, 'utf8') }) } catch { /* text-only snapshot */ } } } }
+  await visit(directory); return { id: `recovered-${name}`, name, framework: 'Software project', files: files.sort((left, right) => left.path.localeCompare(right.path)) }
+}
+async function recoverRun(runId: string) {
+  const directory = path.join(process.cwd(), '.project-lens', 'runs', runId); const metadata = JSON.parse(await readFile(path.join(directory, 'run.json'), 'utf8')) as { projectName?: string; codex?: { model?: string; version?: string } }; const project = await projectFromSnapshot(path.join(directory, 'source'), metadata.projectName ?? 'Recovered project'); const raw = createProjectKnowledgeBase(await runProjectAnalysis(project, [], () => undefined, 0), [], 'Selected folder'); const artifacts = await readRequiredArtifacts(path.join(directory, 'artifacts'), new Set(project.files.map((file) => file.path))); const output: PresentationKnowledgeBase = { ...buildPresentationKnowledgeBase(raw), overviewMarkdown: artifacts['overview.md'], completeGuideMarkdown: artifacts['complete-guide.md'], shortSummary: artifacts['overview.md'].slice(0, 500), overview: { whatItIs: artifacts['overview.md'].slice(0, 2_000) }, sections: [{ id: 'complete-guide-artifact', title: 'Complete Guide', shortExplanation: artifacts['complete-guide.md'].slice(0, 8_000) }] }; const run: Run = { runId, projectId: project.id, agentId: 'codex', model: metadata.codex?.model === 'automatic' ? undefined : metadata.codex?.model, codexVersion: metadata.codex?.version, state: 'completed', createdAt: new Date().toISOString(), cancellationRequested: false, terminalOutcome: 'completed', events: [], controller: new AbortController(), project, runDirectory: directory, report: output }; runs.set(runId, run); event(run, { type: 'artifact_ready', result: output, message: 'Existing analysis artifacts validated.' }); event(run, { type: 'completed', message: 'Analysis complete.' }); await writeRunMetadata(directory, { ...metadata, state: 'completed', artifactState: 'validated', terminalResult: 'completed' }); return run
+}
 
 async function readLocalFolder(folder: string) {
   const root = await realpath(folder); const info = await stat(root)
@@ -98,7 +106,7 @@ export const daemon = createServer(async (req, res) => {
   const origin = req.headers.origin
   if (origin && !allowedOrigins.has(origin)) return send(res, 403, { error: 'origin-not-allowed' })
   if (!isAllowedDaemonRequest(origin, req.headers['x-project-lens-token'] as string | undefined) && url.searchParams.get('token') !== daemonToken) return send(res, 401, { error: 'invalid-daemon-token' })
-  if (req.method === 'GET' && url.pathname === '/api/codex/status') { const result = await resolveCodexCli(); return 'executable' in result ? send(res, 200, { status: result.signedIn ? 'ready' : 'sign-in-required', version: result.version }) : send(res, 503, { status: 'unavailable', error: result.error }) }
+  if (req.method === 'GET' && url.pathname === '/api/codex/status') { const result = await resolveCodexCli(); return 'executable' in result ? send(res, 200, { status: result.signedIn ? 'ready' : 'sign-in-required', version: result.version, models: result.models }) : send(res, 503, { status: 'unavailable', error: result.error }) }
   if (req.method === 'POST' && url.pathname === '/api/source/local-path') {
     try { const parsed = JSON.parse(await body(req, 20_000)) as { path?: string }; if (typeof parsed.path !== 'string' || !parsed.path.trim()) return send(res, 400, { error: 'Enter a local project folder path.' }); return send(res, 200, await readLocalFolder(parsed.path.trim())) } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'The folder could not be prepared locally.' }) }
   }
@@ -113,6 +121,8 @@ export const daemon = createServer(async (req, res) => {
       runs.set(run.runId, run); event(run, { type: 'queued', message: 'Preparing the project.' }); void execute(run).catch((error) => fail(run, error)); return send(res, 202, { runId: run.runId })
     } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Invalid analysis request.' }) }
   }
+  const recoverMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/recheck$/)
+  if (recoverMatch && req.method === 'POST') { try { const run = await recoverRun(recoverMatch[1]); return send(res, 200, { runId: run.runId, report: run.report }) } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Artifacts could not be rechecked.' }) } }
   const match = url.pathname.match(/^\/api\/(?:analysis|runs)\/([^/]+)(?:\/(events|cancel|report|files))?$/)
   if (match) {
     const run = runs.get(match[1]); if (!run) return send(res, 404, { error: 'run-not-found' })

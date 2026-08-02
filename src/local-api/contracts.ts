@@ -4,6 +4,7 @@ export interface CodexStatusDto {
   status: 'checking' | 'ready' | 'sign-in-required' | 'unavailable'
   version?: string
   error?: string
+  models?: string[]
 }
 
 export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'workspace-ready' | 'enriching' | 'enriched' | 'enrichment-unavailable' | 'run_started' | 'thread_started' | 'status' | 'tool_call' | 'tool_result' | 'file_write' | 'warning' | 'artifact_ready' | 'completed' | 'failed' | 'cancelled'
