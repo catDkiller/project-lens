@@ -10,6 +10,8 @@ describe('artifact-first Codex runtime', () => {
   it('normalizes safe snapshot-relative references', () => {
     const manifest = new Set(['python/learning/requirements.txt', 'src/main.ts'])
     expect(normalizeArtifactPath('source/python/learning/requirements.txt', manifest)).toBe('python/learning/requirements.txt')
+    expect(normalizeArtifactPath('../source/python/learning/requirements.txt', manifest, { artifactRelative: true })).toBe('python/learning/requirements.txt')
+    expect(normalizeArtifactPath('../../outside.txt', manifest, { artifactRelative: true })).toBeNull()
     expect(normalizeArtifactPath('./source/src\\main.ts', manifest)).toBe('src/main.ts')
     expect(normalizeArtifactPath('../outside.txt', manifest)).toBeNull()
     expect(normalizeArtifactPath('C:\\private.txt', manifest)).toBeNull()
