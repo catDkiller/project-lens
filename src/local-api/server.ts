@@ -2,18 +2,17 @@ import { createServer } from 'node:http'
 import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { runProjectAnalysis } from '../analysis'
-import { preparedSampleFeatureDefinitions } from '../fixtures/preparedSampleFeatureDefinitions'
-import { preparedSampleLearningPacks } from '../fixtures/preparedSampleLearningPacks'
-import { PROJECT_EXPLANATION_PROMPT_VERSION, PROJECT_EXPLANATION_SYSTEM_PROMPT, createPresentationSchema, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
+import { PROJECT_EXPLANATION_PROMPT_VERSION, buildPresentationKnowledgeBase, createCodexEvidencePrompt, createCodexInsightSchema, createProjectKnowledgeBase, parseCodexInsights, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto } from './contracts'
 import { changedFiles, fileManifest } from './analysisWorkspace'
 import { detectCodex, parseCodexJson, redact } from './codex'
 import { runCodexSdk } from './codexSdkRunner'
 import { localProject, prepareLocalFiles } from '../project-sources/localFolderImport'
+import { createHash } from 'node:crypto'
 
 type Project = { id: string; name: string; framework: string; files: { path: string; content: string }[] }
 type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local' }
@@ -31,13 +30,20 @@ function status(run: Run): AnalysisRunStatusDto { const { controller: _controlle
 function activeRun() { return [...runs.values()].find((run) => !run.terminalOutcome) }
 
 async function sampleProject() {
-  const files = ['src/main.tsx', 'src/App.tsx', 'src/components/AppHeader.tsx', 'src/pages/LoginPage.tsx', 'src/components/LoginForm.tsx', 'src/services/authService.ts', 'src/pages/DashboardPage.tsx', 'src/components/MetricCard.tsx', 'src/utils/formatDate.ts']
-  return { id: 'prepared-vite-sample', name: 'Prepared Vite sample', framework: 'react-vite' as const, files: await Promise.all(files.map(async (file) => ({ path: file, content: await readFile(path.join(sampleRoot, file), 'utf8') }))) }
+  const files: { path: string; content: string }[] = []
+  async function visit(directory: string) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name); const relative = path.relative(sampleRoot, absolute).replaceAll('\\', '/')
+      if (entry.isDirectory()) await visit(absolute)
+      else if (entry.isFile()) { try { files.push({ path: relative, content: await readFile(absolute, 'utf8') }) } catch { /* skip unreadable fixture files */ } }
+    }
+  }
+  await visit(sampleRoot)
+  return { id: 'prepared-sample', name: 'Prepared sample', framework: 'Software project', files: files.sort((left, right) => left.path.localeCompare(right.path)) }
 }
 
-function cacheKey(project: Project, version: string) { return JSON.stringify({ project: project.id, source: project.files.map((file) => file.path), agent: 'codex', version, prompt: PROJECT_EXPLANATION_PROMPT_VERSION }) }
-function prompt(raw: unknown) { return `${PROJECT_EXPLANATION_SYSTEM_PROMPT}\n\nUse only the supplied deterministic evidence below. Do not inspect the filesystem, execute commands, call tools, or invent missing facts. Return exactly one JSON PresentationKnowledgeBase object and no markdown fences.\n\n${JSON.stringify(raw)}` }
-
+function cacheKey(project: Project, version: string, fingerprint: string) { return JSON.stringify({ project: project.id, fingerprint, source: project.files.map((file) => file.path), agent: 'codex', version, prompt: PROJECT_EXPLANATION_PROMPT_VERSION }) }
+function projectFingerprint(project: Project) { const hash = createHash('sha256'); for (const file of [...project.files].sort((left, right) => left.path.localeCompare(right.path))) hash.update(`\0${file.path}\0${file.content}`); return hash.digest('hex') }
 async function execute(run: Run) {
   const project = run.project ?? await sampleProject()
   setState(run, 'preparing-project'); event(run, { type: 'preparing-evidence', message: 'Inspecting the project structure.' })
@@ -45,31 +51,34 @@ async function execute(run: Run) {
   if (!('executable' in codex)) throw Object.assign(new Error(codex.error), { code: 'codex-unavailable' })
   if (!codex.signedIn) throw Object.assign(new Error('Sign in to Codex before analysing a project.'), { code: 'codex-sign-in-required' })
   run.codexVersion = codex.version
-  const key = cacheKey(project, codex.version)
+  const key = cacheKey(project, codex.version, projectFingerprint(project))
   const cached = cache.get(key)
   if (cached) { run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', result: cached, message: 'Opened the generated workspace.' }); return }
-  const analysis = await runProjectAnalysis(project, preparedSampleFeatureDefinitions, (stage, state) => { if (state === 'running') event(run, { type: 'analysing', message: `Checking ${stage}.` }) }, 0)
-  const raw = createProjectKnowledgeBase(analysis, preparedSampleLearningPacks, run.source ? 'Local folder' : 'Prepared sample')
+  const analysis = await runProjectAnalysis(project, [], (stage, state) => { if (state === 'running') event(run, { type: 'analysing', message: `Checking ${stage}.` }) }, 0)
+  const raw = createProjectKnowledgeBase(analysis, [], run.source ? 'Selected folder' : 'Prepared sample')
   const workspace = await mkdtemp(path.join(tmpdir(), 'project-lens-codex-'))
   const evidenceDirectory = await mkdtemp(path.join(tmpdir(), 'project-lens-evidence-'))
   try {
     const baseline = await fileManifest(workspace)
     setState(run, 'spawning-agent'); event(run, { type: 'starting-agent', message: 'Starting Codex in an empty disposable workspace.' })
-    const result = await runCodexSdk({ executable: codex.executable, workingDirectory: workspace, model: undefined, prompt: prompt({ promptVersion: PROJECT_EXPLANATION_PROMPT_VERSION, rawKnowledge: raw, limitations: raw.limitations ?? [] }), signal: run.controller.signal })
+    const result = await runCodexSdk({ executable: codex.executable, workingDirectory: workspace, model: undefined, prompt: createCodexEvidencePrompt(raw), signal: run.controller.signal })
     setState(run, 'receiving-agent-events'); event(run, { type: 'analysing', message: 'Codex returned the project explanation.' }, true)
     if (changedFiles(baseline, await fileManifest(workspace)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
     setState(run, 'validating'); event(run, { type: 'validating', message: 'Validating the generated project guide.' })
-    let text = result.finalResponse.slice(0, 1_000_000); let output: unknown; let issues: string[]
-    try { output = parseCodexJson(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
+    let text = result.finalResponse.slice(0, 1_000_000); let insights: import('../knowledge').CodexInsightResponse | undefined; let issues: string[]
+    try { const parsed = parseCodexInsights(parseCodexJson(text), raw); insights = parsed.insights; issues = parsed.issues } catch { issues = ['insight: malformed output'] }
     if (issues.length && text.trim()) {
       setState(run, 'repairing'); event(run, { type: 'repairing', message: 'Repairing the returned JSON against the required schema.' })
-      const repair = await runCodexSdk({ executable: codex.executable, workingDirectory: workspace, model: undefined, outputSchema: createPresentationSchema(), prompt: `Return corrected JSON only. Validation errors: ${issues.join('; ')}. Previous response:\n${text}`, signal: run.controller.signal })
+      const repair = await runCodexSdk({ executable: codex.executable, workingDirectory: workspace, model: undefined, outputSchema: createCodexInsightSchema(), prompt: `Return corrected JSON only. Validation errors: ${issues.join('; ')}. Previous response:\n${text}`, signal: run.controller.signal })
       if (changedFiles(baseline, await fileManifest(workspace)).length) throw new Error('Codex changed the disposable workspace. The result was rejected.')
       text = repair.finalResponse.slice(0, 1_000_000)
-      try { output = parseCodexJson(text); issues = validatePresentationKnowledgeBase(output, raw) } catch { issues = ['presentation: malformed output'] }
+      try { const parsed = parseCodexInsights(parseCodexJson(text), raw); insights = parsed.insights; issues = parsed.issues } catch { issues = ['insight: malformed output'] }
     }
-    if (issues.length) throw Object.assign(new Error(`Codex output could not be validated: ${issues.join('; ')}`), { code: 'output-invalid' })
-    cache.set(key, output as PresentationKnowledgeBase); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', result: output as PresentationKnowledgeBase, message: 'Opened the generated workspace.' })
+    const output = buildPresentationKnowledgeBase(raw, insights)
+    const presentationIssues = validatePresentationKnowledgeBase(output, raw)
+    if (issues.length || presentationIssues.length) throw Object.assign(new Error(`Codex output could not be validated: ${[...issues, ...presentationIssues].join('; ')}`), { code: 'output-invalid' })
+    if (output.projectName !== project.name || output.files?.some((file) => !raw.importantFiles?.some((known) => known.path === file.path))) throw Object.assign(new Error('Generated workspace does not match the selected folder.'), { code: 'source-mismatch' })
+    cache.set(key, output); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', result: output, message: 'Opened the generated workspace.' })
   } finally { await rm(workspace, { recursive: true, force: true, maxRetries: 3 }); await rm(evidenceDirectory, { recursive: true, force: true, maxRetries: 3 }) }
 }
 

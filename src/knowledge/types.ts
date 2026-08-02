@@ -57,4 +57,5 @@ export interface ProjectKnowledgeBase {
   models?: ProjectItem[]
   limitations?: string[]
   analysisCoverage?: { analysed: number; detected: number; skipped: number; unsupported: number }
+  sourceFingerprint?: string
 }

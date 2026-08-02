@@ -1,4 +1,6 @@
 export { createProjectKnowledgeBase } from './adapter'
+export { buildPresentationKnowledgeBase, createCodexEvidencePrompt, createCodexInsightSchema, parseCodexInsights } from './codexInsights'
+export type { CodexInsightResponse } from './codexInsights'
 export { createPresentationFallback } from './presentationFallback'
 export { validatePresentationKnowledgeBase } from './presentationValidation'
 export { createPresentationSchema } from './presentationSchema'
