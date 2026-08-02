@@ -3,5 +3,28 @@ import { demoReport } from '../content/demoReport'
 
 export function ReportDemo() {
   const [view, setView] = useState<'overview' | 'guide'>('overview')
-  return <section className="report-demo" id="report" aria-labelledby="report-title"><div className="section-intro"><p className="eyebrow">Real Project Lens output</p><h2 id="report-title">A preserved report, ready to explore.</h2><p>Generated from a small Python computer-vision project. Analysing your own folder happens locally through the open-source Project Lens application.</p></div><div className="report-shell"><nav aria-label="Demo report views"><button className={view === 'overview' ? 'selected' : ''} onClick={() => setView('overview')}>Overview</button><button className={view === 'guide' ? 'selected' : ''} onClick={() => setView('guide')}>Complete Guide</button></nav><article><p className="report-kicker">{view === 'overview' ? 'Evidence-backed overview' : 'Guided technical depth'}</p><h3>{demoReport.title}</h3>{view === 'overview' ? <><p className="report-summary">{demoReport.summary}</p><div className="report-areas">{demoReport.areas.map((area) => <section key={area.title}><h4>{area.title}</h4><p>{area.detail}</p><code>{area.file}</code></section>)}</div></> : <ol className="guide-list">{demoReport.guide.map((item) => <li key={item}>{item}</li>)}</ol>}<details><summary>View technical evidence</summary><ul>{demoReport.evidence.map((fact) => <li key={fact}>{fact}</li>)}</ul></details><details><summary>Known uncertainty</summary><ul>{demoReport.unknowns.map((fact) => <li key={fact}>{fact}</li>)}</ul></details></article></div></section>
+  const report = demoReport[view]
+
+  return <section className="report-demo reveal" id="report" aria-labelledby="report-title">
+    <div className="section-intro">
+      <p className="eyebrow">Product interface preview</p>
+      <h2 id="report-title">Two ways to read the same project.</h2>
+      <p>Overview builds the mental model quickly. Complete Guide stays with the details when you need them.</p>
+    </div>
+    <div className="report-shell">
+      <nav aria-label="Product preview views">
+        <button className={view === 'overview' ? 'selected' : ''} aria-pressed={view === 'overview'} onClick={() => setView('overview')}>Overview</button>
+        <button className={view === 'guide' ? 'selected' : ''} aria-pressed={view === 'guide'} onClick={() => setView('guide')}>Complete Guide</button>
+      </nav>
+      <article>
+        <p className="report-kicker">{view === 'overview' ? 'Orientation' : 'Technical depth'}</p>
+        <h3>{report.title}</h3>
+        <p className="report-summary">{report.copy}</p>
+        {view === 'overview'
+          ? <div className="report-areas">{demoReport.overview.items.map((item) => <section key={item.title}><h4>{item.title}</h4><p>{item.detail}</p></section>)}</div>
+          : <ol className="guide-list">{demoReport.guide.items.map((item) => <li key={item}>{item}</li>)}</ol>}
+        <details><summary>How explanations stay grounded</summary><p>Each explanation points back to relevant files and clearly labels uncertainty. This preview is conceptual product content, not a live project report.</p></details>
+      </article>
+    </div>
+  </section>
 }
