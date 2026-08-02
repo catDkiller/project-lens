@@ -17,7 +17,8 @@ export function normalizeArtifactPath(value: string, manifestPaths: Iterable<str
   else cleaned = cleaned.replace(/^\.\//, '').replace(/^source\//i, '')
   if (!cleaned || [...cleaned].some((character) => character.charCodeAt(0) < 32) || cleaned.startsWith('/') || cleaned.startsWith('//') || /^[a-z]:\//i.test(cleaned) || cleaned.split('/').some((part) => part === '..')) return null
   const target = cleaned.split('/').filter((part) => part && part !== '.').join('/')
-  if (/^(models|output|logs|\.cache|cache)\//i.test(target) || /\.(task|log)$/i.test(target)) return target
+  if (target.includes('*')) return target
+  if (/^(models|output|logs|\.cache|cache|skill|artifacts)\//i.test(target) || /\.(task|log)$/i.test(target)) return target
   const paths = [...manifestPaths]; const compare = (path: string) => process.platform === 'win32' ? path.toLowerCase() === target.toLowerCase() : path === target
   const matched = paths.find(compare); if (matched) return matched
   const directory = paths.find((path) => process.platform === 'win32' ? path.toLowerCase().startsWith(`${target.toLowerCase().replace(/\/$/, '')}/`) : path.startsWith(`${target.replace(/\/$/, '')}/`)); if (directory) return target.replace(/\/$/, '')

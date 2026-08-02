@@ -8,6 +8,7 @@
     "dev:web": "vite",
     "daemon": "tsx src/local-api/server.ts",
     "project-lens": "tsx src/local-api/cli.ts",
+    "artifact:audit": "tsx src/local-api/artifactAudit.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run --exclude \"**/.project-lens/**\"",
