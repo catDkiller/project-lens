@@ -2,11 +2,11 @@ import type { ProjectKnowledgeBase } from './types'
 import type { EvidenceReference, PresentationKnowledgeBase, PresentationSection } from './presentationTypes'
 
 const MAX_TITLE = 100
-const MAX_TEXT = 500
+export const MAX_PRESENTATION_TEXT_LENGTH = 400
 const statuses = new Set(['analysed', 'inferred', 'detected', 'partial', 'unsupported', 'binary', 'skipped', 'generated', 'uncertain'])
 
 function invalidText(value: string | undefined, allowEmpty = true) {
-  return value !== undefined && (!allowEmpty && !value.trim() || value.length > MAX_TEXT || /<[^>]+>/.test(value))
+  return value !== undefined && (!allowEmpty && !value.trim() || value.length > MAX_PRESENTATION_TEXT_LENGTH || /<[^>]+>/.test(value))
 }
 
 function checkReferences(references: EvidenceReference[] | undefined, knownPaths: Set<string>, label: string, issues: string[]) {

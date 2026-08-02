@@ -1,16 +1,18 @@
 import { createServer } from 'node:http'
 import type { ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { appendFile, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { runProjectAnalysis } from '../analysis'
-import { buildPresentationKnowledgeBase, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
+import { buildReportFromValidatedArtifacts, createProjectKnowledgeBase, REPORT_BUILDER_VERSION, REPORT_SCHEMA_VERSION, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto } from './contracts'
 import { redact } from './codex'
 import { buildCodexArgs, readRequiredArtifacts, resolveCodexCli, runCodexCli, stageRun } from './codexCli'
 import { acceptsLocalPath, classifyLocalPath, localProject, prepareLocalFiles, type LocalSkipReason } from '../project-sources/localFolderImport'
 import { assessLocalProject } from '../project-sources/support'
+import { ARTIFACT_VALIDATOR_VERSION, PERSISTED_RUN_SCHEMA_VERSION, PROJECT_LENS_API_VERSION } from '../runtimeVersion'
 
 type Project = { id: string; name: string; framework: string; files: { path: string; content: string }[] }
 type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local'; sourcePath?: string; runDirectory?: string; report?: PresentationKnowledgeBase }
@@ -18,6 +20,9 @@ const runs = new Map<string, Run>()
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
 export const daemonToken = process.env.PROJECT_LENS_API_TOKEN ?? randomUUID()
 const allowedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173', 'http://[::1]:5173'])
+const daemonStartedAt = new Date().toISOString()
+const gitCommit = process.env.PROJECT_LENS_GIT_COMMIT ?? (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' }).trim() } catch { return 'unknown' } })()
+const daemonBuildId = process.env.PROJECT_LENS_BUILD_ID ?? `api-${gitCommit}-${PROJECT_LENS_API_VERSION}-${REPORT_SCHEMA_VERSION}`
 
 export function isAllowedDaemonRequest(origin: string | undefined, token: string | undefined) { return (!origin || allowedOrigins.has(origin)) && token === daemonToken }
 function send(res: import('node:http').ServerResponse, status: number, body: unknown) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
@@ -44,7 +49,7 @@ async function projectFromSnapshot(directory: string, name: string) {
   await visit(directory); return { id: `recovered-${name}`, name, framework: 'Software project', files: files.sort((left, right) => left.path.localeCompare(right.path)) }
 }
 async function recoverRun(runId: string) {
-  const directory = path.join(process.cwd(), '.project-lens', 'runs', runId); const metadata = JSON.parse(await readFile(path.join(directory, 'run.json'), 'utf8')) as { projectName?: string; codex?: { model?: string; version?: string } }; const project = await projectFromSnapshot(path.join(directory, 'source'), metadata.projectName ?? 'Recovered project'); const raw = createProjectKnowledgeBase(await runProjectAnalysis(project, [], () => undefined, 0), [], 'Selected folder'); const artifacts = await readRequiredArtifacts(path.join(directory, 'artifacts'), new Set(project.files.map((file) => file.path))); const output: PresentationKnowledgeBase = { ...buildPresentationKnowledgeBase(raw), overviewMarkdown: artifacts['overview.md'], completeGuideMarkdown: artifacts['complete-guide.md'], shortSummary: artifacts['overview.md'].slice(0, 500), overview: { whatItIs: artifacts['overview.md'].slice(0, 2_000) }, sections: [{ id: 'complete-guide-artifact', title: 'Complete Guide', shortExplanation: artifacts['complete-guide.md'].slice(0, 450) }] }; const run: Run = { runId, projectId: project.id, agentId: 'codex', model: metadata.codex?.model === 'automatic' ? undefined : metadata.codex?.model, codexVersion: metadata.codex?.version, state: 'completed', createdAt: new Date().toISOString(), cancellationRequested: false, terminalOutcome: 'completed', events: [], controller: new AbortController(), project, runDirectory: directory, report: output }; runs.set(runId, run); event(run, { type: 'artifact_ready', result: output, message: 'Existing analysis artifacts validated.' }); event(run, { type: 'completed', message: 'Analysis complete.' }); await writeRunMetadata(directory, { ...metadata, state: 'completed', artifactState: 'validated', terminalResult: 'completed' }); return run
+  const directory = path.join(process.cwd(), '.project-lens', 'runs', runId); const metadata = JSON.parse(await readFile(path.join(directory, 'run.json'), 'utf8')) as { projectName?: string; codex?: { model?: string; version?: string }; error?: string; schemaVersion?: number }; const { error: _oldError, schemaVersion: _oldVersion, ...recoveredMetadata } = metadata; const project = await projectFromSnapshot(path.join(directory, 'source'), metadata.projectName ?? 'Recovered project'); const raw = createProjectKnowledgeBase(await runProjectAnalysis(project, [], () => undefined, 0), [], 'Selected folder'); const artifacts = await readRequiredArtifacts(path.join(directory, 'artifacts'), new Set(project.files.map((file) => file.path))); const output = buildReportFromValidatedArtifacts(raw, { overview: artifacts['overview.md'], completeGuide: artifacts['complete-guide.md'] }); const issues = validatePresentationKnowledgeBase(output, raw); if (issues.length) throw Object.assign(new Error(issues.join('; ')), { code: 'report-rebuild-invalid' }); await writeReport(directory, output); const run: Run = { runId, projectId: project.id, agentId: 'codex', model: metadata.codex?.model === 'automatic' ? undefined : metadata.codex?.model, codexVersion: metadata.codex?.version, state: 'completed', createdAt: new Date().toISOString(), cancellationRequested: false, terminalOutcome: 'completed', events: [], controller: new AbortController(), project, runDirectory: directory, report: output }; runs.set(runId, run); event(run, { type: 'artifact_ready', result: output, message: 'Existing analysis artifacts validated.' }); event(run, { type: 'completed', message: 'Analysis complete.' }); await writeRunMetadata(directory, { ...recoveredMetadata, error: undefined, state: 'completed', artifactState: 'validated', terminalResult: 'completed', reportSchemaVersion: REPORT_SCHEMA_VERSION, reportBuilderVersion: REPORT_BUILDER_VERSION }); return run
 }
 
 async function readLocalFolder(folder: string) {
@@ -66,11 +71,13 @@ function sourceHash(files: Project['files']) { return createHash('sha256').updat
 async function stagedSourceHash(source: string, files: Project['files']) { const snapshot = await Promise.all(files.map(async (file) => ({ path: file.path, content: await readFile(path.join(source, ...file.path.split('/')), 'utf8') }))); return sourceHash(snapshot) }
 async function writeRunMetadata(directory: string, values: Record<string, unknown>) {
   const target = path.join(directory, 'run.json'); const temporary = `${target}.${randomUUID()}.tmp`
-  await writeFile(temporary, JSON.stringify({ schemaVersion: 2, ...values }, null, 2), 'utf8'); await rename(temporary, target)
+  let existing: Record<string, unknown> = {}; try { existing = JSON.parse(await readFile(target, 'utf8')) as Record<string, unknown> } catch { /* initial write */ }
+  const merged: Record<string, unknown> = { ...existing, ...values, schemaVersion: PERSISTED_RUN_SCHEMA_VERSION }; Object.keys(merged).forEach((key) => { if (merged[key] === undefined) delete merged[key] })
+  await writeFile(temporary, JSON.stringify(merged, null, 2), 'utf8'); await rename(temporary, target)
 }
 async function writeReport(directory: string, report: PresentationKnowledgeBase) {
   const target = path.join(directory, 'report.json'); const temporary = `${target}.${randomUUID()}.tmp`
-  await writeFile(temporary, JSON.stringify({ schemaVersion: 1, report }, null, 2), 'utf8'); await rename(temporary, target)
+  await writeFile(temporary, JSON.stringify({ schemaVersion: REPORT_SCHEMA_VERSION, reportBuilderVersion: REPORT_BUILDER_VERSION, report }, null, 2), 'utf8'); await rename(temporary, target)
 }
 async function execute(run: Run) {
   const project = run.project ?? await sampleProject()
@@ -95,8 +102,7 @@ async function execute(run: Run) {
     if (result.code !== 0) throw Object.assign(new Error(`Codex exited with code ${result.code}.`), { code: 'codex-invocation-failed', exitCode: result.code, stderr: result.stderr })
     if (await stagedSourceHash(staged.source, project.files) !== metadata.sourceSnapshotHash) throw Object.assign(new Error('Codex modified the protected source snapshot.'), { code: 'source-mismatch' })
     const artifacts = await readRequiredArtifacts(staged.artifacts, new Set(project.files.map((file) => file.path)))
-    const baseOutput = buildPresentationKnowledgeBase(raw)
-    const output: PresentationKnowledgeBase = { ...baseOutput, overviewMarkdown: artifacts['overview.md'], completeGuideMarkdown: artifacts['complete-guide.md'], shortSummary: artifacts['overview.md'].slice(0, 500), overview: { ...baseOutput.overview, whatItIs: artifacts['overview.md'].slice(0, 2_000) }, sections: [{ id: 'complete-guide-artifact', title: 'Complete Guide', shortExplanation: artifacts['complete-guide.md'].slice(0, 450) }, ...(baseOutput.sections ?? [])] }
+    const output = buildReportFromValidatedArtifacts(raw, { overview: artifacts['overview.md'], completeGuide: artifacts['complete-guide.md'] })
     const presentationIssues = validatePresentationKnowledgeBase(output, raw)
     if (presentationIssues.length) throw Object.assign(new Error(`Analysis artifacts could not be validated: ${presentationIssues.join('; ')}`), { code: 'output-invalid' })
     if (output.projectName !== project.name || output.sourceFingerprint !== raw.sourceFingerprint || output.files?.some((file) => !raw.importantFiles?.some((known) => known.path === file.path))) throw Object.assign(new Error('Generated workspace does not match the selected folder.'), { code: 'source-mismatch' })
@@ -110,6 +116,7 @@ async function body(req: import('node:http').IncomingMessage, limit: number) { l
 export const daemon = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   if (req.method === 'GET' && url.pathname === '/api/runtime/health') return send(res, 200, { status: 'ready', version: '0.1.0', token: daemonToken })
+  if (req.method === 'GET' && url.pathname === '/api/meta') return send(res, 200, { app: 'project-lens', buildId: daemonBuildId, gitCommit, daemonStartedAt, processId: process.pid, apiVersion: PROJECT_LENS_API_VERSION, persistedRunSchemaVersion: PERSISTED_RUN_SCHEMA_VERSION, reportSchemaVersion: REPORT_SCHEMA_VERSION, artifactValidatorVersion: ARTIFACT_VALIDATOR_VERSION })
   const origin = req.headers.origin
   if (origin && !allowedOrigins.has(origin)) return send(res, 403, { error: 'origin-not-allowed' })
   if (!isAllowedDaemonRequest(origin, req.headers['x-project-lens-token'] as string | undefined) && url.searchParams.get('token') !== daemonToken) return send(res, 401, { error: 'invalid-daemon-token' })

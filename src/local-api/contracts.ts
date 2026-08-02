@@ -7,6 +7,18 @@ export interface CodexStatusDto {
   models?: string[]
 }
 
+export interface RuntimeMetaDto {
+  app: 'project-lens'
+  buildId: string
+  gitCommit: string
+  daemonStartedAt: string
+  processId: number
+  apiVersion: number
+  persistedRunSchemaVersion: number
+  reportSchemaVersion: number
+  artifactValidatorVersion: number
+}
+
 export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'workspace-ready' | 'enriching' | 'enriched' | 'enrichment-unavailable' | 'run_started' | 'thread_started' | 'status' | 'tool_call' | 'tool_result' | 'file_write' | 'warning' | 'artifact_ready' | 'completed' | 'failed' | 'cancelled'
 export type AnalysisRunState = 'queued' | 'preparing-project' | 'workspace-ready' | 'enriching-with-codex' | 'enrichment-complete' | 'enrichment-unavailable' | 'running' | 'artifact-ready' | 'completed' | 'cancelling' | 'cancelled' | 'failed'
 export type AnalysisFailureCode = 'codex-unavailable' | 'codex-sign-in-required' | 'codex-invocation-failed' | 'process-startup-failure' | 'output-invalid' | 'analysis-aborted' | 'unknown'
