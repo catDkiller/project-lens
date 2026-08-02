@@ -1071,4 +1071,9 @@ summary {
 .launcher-section-label { color: var(--muted); font-size: .76rem; font-weight: 700; letter-spacing: .08em; margin: 0; text-transform: uppercase; }
 .ai-ready, .local-support { color: var(--muted); margin: 0; }
 .ai-ready { color: var(--text); font-weight: 650; }
- .artifact-markdown { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; margin: 1.25rem 0; }
+ .artifact-markdown { overflow-wrap: anywhere; line-height: 1.65; margin: 1.25rem 0; }
+ .artifact-markdown :is(h1, h2, h3) { margin-top: 1.6rem; }
+ .artifact-markdown :is(p, li) { max-width: 74ch; }
+ .artifact-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+ .artifact-markdown th, .artifact-markdown td { padding: .55rem .7rem; border-bottom: 1px solid var(--line); text-align: left; }
+ .artifact-markdown pre { overflow-x: auto; padding: 1rem; border-radius: .6rem; background: var(--code-bg); }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { buildCodexArgs, normalizeArtifactPath, readRequiredArtifacts, stageRun } from '../src/local-api/codexCli'
@@ -25,5 +25,6 @@ describe('artifact-first Codex runtime', () => {
     const run = await stageRun(root, 'run-1', [{ path: 'src/main.ts', content: 'export {}' }], '# skill')
     await writeFile(path.join(run.artifacts, 'overview.md'), '# Overview\n`src/main.ts`', 'utf8'); await writeFile(path.join(run.artifacts, 'complete-guide.md'), '# Guide\nRead `src/main.ts`.', 'utf8')
     await expect(readRequiredArtifacts(run.artifacts, new Set(['src/main.ts']))).resolves.toMatchObject({ 'overview.md': expect.stringContaining('Overview') })
+    await expect(readFile(path.join(run.directory, 'source-manifest.json'), 'utf8')).resolves.toContain('src/main.ts')
   })
 })

@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import type { ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { appendFile, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { runProjectAnalysis } from '../analysis'
 import { buildPresentationKnowledgeBase, createProjectKnowledgeBase, validatePresentationKnowledgeBase } from '../knowledge'
 import type { PresentationKnowledgeBase } from '../knowledge'
@@ -64,7 +64,14 @@ async function readLocalFolder(folder: string) {
 }
 function sourceHash(files: Project['files']) { return createHash('sha256').update(files.map((file) => `${file.path}\0${file.content}\0`).join('')).digest('hex') }
 async function stagedSourceHash(source: string, files: Project['files']) { const snapshot = await Promise.all(files.map(async (file) => ({ path: file.path, content: await readFile(path.join(source, ...file.path.split('/')), 'utf8') }))); return sourceHash(snapshot) }
-async function writeRunMetadata(directory: string, values: Record<string, unknown>) { await writeFile(path.join(directory, 'run.json'), JSON.stringify(values, null, 2), 'utf8') }
+async function writeRunMetadata(directory: string, values: Record<string, unknown>) {
+  const target = path.join(directory, 'run.json'); const temporary = `${target}.${randomUUID()}.tmp`
+  await writeFile(temporary, JSON.stringify({ schemaVersion: 2, ...values }, null, 2), 'utf8'); await rename(temporary, target)
+}
+async function writeReport(directory: string, report: PresentationKnowledgeBase) {
+  const target = path.join(directory, 'report.json'); const temporary = `${target}.${randomUUID()}.tmp`
+  await writeFile(temporary, JSON.stringify({ schemaVersion: 1, report }, null, 2), 'utf8'); await rename(temporary, target)
+}
 async function execute(run: Run) {
   const project = run.project ?? await sampleProject()
   setState(run, 'preparing-project'); event(run, { type: 'preparing-evidence', message: 'Inspecting the project structure.' })
@@ -93,7 +100,7 @@ async function execute(run: Run) {
     const presentationIssues = validatePresentationKnowledgeBase(output, raw)
     if (presentationIssues.length) throw Object.assign(new Error(`Analysis artifacts could not be validated: ${presentationIssues.join('; ')}`), { code: 'output-invalid' })
     if (output.projectName !== project.name || output.sourceFingerprint !== raw.sourceFingerprint || output.files?.some((file) => !raw.importantFiles?.some((known) => known.path === file.path))) throw Object.assign(new Error('Generated workspace does not match the selected folder.'), { code: 'source-mismatch' })
-    run.report = output; metadata.state = 'artifact-ready'; metadata.artifactState = 'validated'; metadata.terminalResult = 'completed'; setState(run, 'artifact-ready'); event(run, { type: 'artifact_ready', result: output, message: 'Analysis artifacts validated.' }); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Analysis complete.' })
+    run.report = output; await writeReport(staged.directory, output); metadata.state = 'artifact-ready'; metadata.artifactState = 'validated'; metadata.terminalResult = 'completed'; setState(run, 'artifact-ready'); event(run, { type: 'artifact_ready', result: output, message: 'Analysis artifacts validated.' }); run.terminalOutcome = 'completed'; setState(run, 'completed'); event(run, { type: 'completed', message: 'Analysis complete.' })
   } finally { metadata.state = run.state; metadata.terminalResult = run.terminalOutcome; await writeRunMetadata(staged.directory, metadata) }
 }
 
@@ -130,7 +137,13 @@ export const daemon = createServer(async (req, res) => {
     if (match[2] === 'report' && req.method === 'GET') return run.report ? send(res, 200, run.report) : send(res, 409, { error: 'report-not-ready' })
     if (match[2] === 'files' && req.method === 'GET') return send(res, 200, { files: run.project?.files.map((file) => file.path) ?? [] })
     if (match[2] === 'cancel' && req.method === 'POST') { run.cancellationRequested = true; setState(run, 'cancelling'); event(run, { type: 'preparing-evidence', message: 'Cancellation requested.' }); run.controller.abort(); return send(res, 202, { runId: run.runId, status: 'cancelling' }) }
-    if (match[2] === 'events' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', connection: 'keep-alive' }); let index = 0; const timer = setInterval(() => { if (index === run.events.length) res.write(': keepalive\n\n'); while (index < run.events.length) { const current = run.events[index++]; res.write(`event: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) { clearInterval(timer); res.end(); return } } }, 1000); req.on('close', () => clearInterval(timer)); return }
+    if (match[2] === 'events' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', connection: 'keep-alive' })
+      const lastEventId = Number(req.headers['last-event-id'] ?? url.searchParams.get('lastEventId') ?? 0); let index = Number.isInteger(lastEventId) && lastEventId >= 0 ? lastEventId : 0
+      let closed = false; const close = () => { if (!closed) { closed = true; clearInterval(timer); res.end() } }
+      const timer = setInterval(() => { if (closed) return; if (index === run.events.length) res.write(': keepalive\n\n'); while (index < run.events.length) { const current = run.events[index++]; res.write(`id: ${index}\nevent: ${current.type}\ndata: ${JSON.stringify(current)}\n\n`); if (['completed', 'failed', 'cancelled'].includes(current.type)) return close() } }, 500)
+      req.on('close', close); req.on('aborted', close); return
+    }
   }
   send(res, 404, { error: 'Not found.' })
 })
