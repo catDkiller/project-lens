@@ -10,7 +10,7 @@
     "project-lens": "tsx src/local-api/cli.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "vitest run",
+    "test": "vitest run --exclude \"**/.project-lens/**\"",
     "preview": "vite preview"
   },
   "dependencies": {
