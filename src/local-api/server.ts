@@ -30,7 +30,7 @@ export function isAllowedDaemonRequest(origin: string | undefined, token: string
 function send(res: import('node:http').ServerResponse, status: number, body: unknown) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 function setState(run: Run, state: AnalysisRunState) { run.state = state; if (!run.startedAt && state !== 'queued') run.startedAt = new Date().toISOString() }
 function event(run: Run, next: AnalysisEventDto, genuine = false) { const timestamp = new Date().toISOString(); run.lastAnyEventAt = timestamp; if (!run.firstStageEventAt && next.stage) run.firstStageEventAt = timestamp; if (next.stage === 'discovery' && next.status === 'active' && !run.discoveryStartedAt) run.discoveryStartedAt = timestamp; if (genuine) run.lastGenuineAgentEventAt = timestamp; run.events.push({ ...next, id: next.id ?? randomUUID(), runId: run.runId, sequence: run.events.length + 1, timestamp }) }
-function status(run: Run): AnalysisRunStatusDto { const { controller: _controller, child: _child, project: _project, source: _source, sourcePath: _sourcePath, runDirectory: _runDirectory, report: _report, ...result } = run; return result }
+function status(run: Run): AnalysisRunStatusDto { const { controller: _controller, child: _child, workerWatchdog: _workerWatchdog, project: _project, source: _source, sourcePath: _sourcePath, runDirectory: _runDirectory, report: _report, ...result } = run; return result }
 function activeRun() { return [...runs.values()].find((run) => !run.terminalOutcome) }
 
 async function sampleProject() {
