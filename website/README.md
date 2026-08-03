@@ -1,11 +1,12 @@
-# Project Lens public demo website
+# Project Lens public website
 
-This independent Vite site is the static public story for Project Lens. It has no daemon, account, or environment requirement.
+This independent Vite site is the static public story for Project Lens. It
+uses the approved interactive landscape language: quiet terrain, editorial
+serif type, section navigation, and keyboard/drag/scroll movement.
 
-The report preview is a preserved, static presentation of the product’s
-Overview and Complete Guide reading model. It does not claim to analyse the
-visitor’s project or provide live uploads. See [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)
-for the public visual and interaction rules.
+It has no daemon, account, upload flow, or environment requirement. The page
+does not analyse visitor projects; it explains the evidence-backed Overview and
+Complete Guide experience.
 
 ## Local development
 
@@ -18,13 +19,10 @@ npm run build
 npm run preview
 ```
 
-## Static deployment on Vercel
+From the repository root, use `npm run website:dev`. The public site uses port
+4174 so it cannot conflict with the Project Lens application.
 
-Import the repository in Vercel, then set the project **Root Directory** to `website`.
+## Static deployment
 
-- Framework preset: `Vite`
-- Install command: `npm install`
-- Build command: `npm run build`
-- Output directory: `dist`
-
-No environment variables are required. The recorded walkthrough is optional: when available, provide a public video URL using `VITE_DEMO_VIDEO_URL`; otherwise the designed placeholder remains visible.
+Set the deployment root directory to `website`, use `npm run build`, and serve
+the generated `dist` directory. No environment variables are required.

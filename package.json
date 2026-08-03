@@ -7,6 +7,11 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,blue \"npm run daemon\" \"npm run dev:web\"",
     "dev:web": "vite",
+    "website:dev": "npm --prefix website run dev",
+    "website:build": "npm --prefix website run build",
+    "website:lint": "npm --prefix website run lint",
+    "website:test": "npm --prefix website run test",
+    "website:preview": "npm --prefix website run preview",
     "daemon": "tsx src/local-api/server.ts",
     "project-lens": "tsx src/local-api/cli.ts",
     "artifact:audit": "tsx src/local-api/artifactAudit.ts",

@@ -43,6 +43,19 @@ The browser talks to a loopback TypeScript daemon. Project-source adapters norma
 
 See [runtime architecture](docs/runtime-architecture.md) and [runtime adapters](docs/runtime-adapters.md) for implementation details.
 
+## Public website
+
+The static Project Lens story uses the approved interactive landscape
+prototype language and is independent from the local analyser:
+
+```powershell
+npm run website:dev
+```
+
+It serves `website/` at `http://localhost:4174`. The dedicated
+`start-project-lens-website.bat` and `stop-project-lens-website.bat` launchers
+control only that public website process.
+
 ## License and attribution
 
 Project Lens is released under the MIT License. The Codex CLI adapter contains an Apache-2.0-attributed adaptation of process and JSONL event-stream ideas from Open Design; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
