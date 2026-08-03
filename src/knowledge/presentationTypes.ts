@@ -44,6 +44,8 @@ export interface PresentationFile {
   technicalName?: string
   analysisStatus?: AnalysisStatus
   evidenceReferences?: EvidenceReference[]
+  /** Readable local evidence only. Renderers must keep excerpts bounded. */
+  preview?: string
 }
 
 export interface PresentationTechnology {

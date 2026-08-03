@@ -869,6 +869,28 @@ code {
   font-family: var(--font-mono);
 }
 
+.token-folder, .token-file, .token-function, .token-type, .token-command, .token-env { border-radius: .25rem; font-weight: 650; padding: .08em .28em; }
+.token-folder { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--heading-secondary); }
+.token-file { background: color-mix(in srgb, var(--success) 11%, transparent); color: color-mix(in srgb, var(--success) 70%, var(--fg)); }
+.token-function { background: color-mix(in srgb, var(--warning) 12%, transparent); color: color-mix(in srgb, var(--warning) 76%, var(--fg)); }
+.token-type { background: color-mix(in srgb, var(--secondary-accent) 13%, transparent); color: color-mix(in srgb, var(--secondary-accent) 76%, var(--fg)); }
+.token-command { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--heading-secondary); }
+.token-env { background: color-mix(in srgb, var(--danger) 10%, transparent); color: color-mix(in srgb, var(--danger) 70%, var(--fg)); }
+.technical-term { align-items: baseline; display: inline-flex; gap: .2rem; }
+.technical-term dfn { color: var(--heading-secondary); font-style: normal; font-weight: 700; text-decoration: underline dotted var(--accent); text-underline-offset: .16em; }
+.technical-term details { display: inline-block; position: relative; }
+.technical-term summary { align-items: center; background: var(--accent-light); border-radius: 50%; color: var(--heading-secondary); cursor: pointer; display: inline-flex; font-size: .67rem; height: 1rem; justify-content: center; list-style: none; width: 1rem; }
+.technical-term summary::-webkit-details-marker { display: none; }
+.technical-term details p { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: 0 .75rem 1.8rem rgb(10 20 30 / 16%); color: var(--fg-secondary); font-size: .82rem; left: 0; line-height: 1.45; margin: .35rem 0 0; padding: .65rem; position: absolute; width: min(18rem, 70vw); z-index: 3; }
+.code-excerpt { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: .85rem; }
+.code-excerpt-header { align-items: center; display: flex; flex-wrap: wrap; gap: .45rem; margin: .75rem 0 .45rem; }
+.code-excerpt-header > span { color: var(--muted); font-size: .76rem; }
+.code-excerpt-header button { background: transparent; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--fg-secondary); cursor: pointer; font-size: .74rem; margin-left: auto; padding: .3rem .5rem; }
+.code-excerpt pre { margin: 0; max-height: 28rem; overflow: auto; padding: .75rem 0; }
+.code-line { display: grid; grid-template-columns: 3rem minmax(0, 1fr); min-width: max-content; }
+.code-line b { border-right: 1px solid color-mix(in srgb, var(--code-fg) 15%, transparent); color: color-mix(in srgb, var(--code-fg) 45%, transparent); font-weight: 500; padding: 0 .6rem; text-align: right; user-select: none; }
+.code-line > span { padding: 0 .75rem; white-space: pre; }
+
 .decision {
   background: var(--surface);
   border-left: 3px solid var(--warning);
