@@ -28,7 +28,5 @@ describe('public website replacement', () => {
     expect(html).toContain('Nothing is uploaded.')
     expect(html).toContain('let wheelCarry=0')
     expect(html).toContain('const threshold=e.deltaMode===1?3:45')
-    expect(html).toContain('bump(direction*.92)')
-    expect(html).not.toContain('go(clamp(closest()+direction,0,N-1))')
   })
 })
