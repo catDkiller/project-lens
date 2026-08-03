@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { KnowledgeWorkspace } from '../src/app/KnowledgeWorkspace'
 import type { PresentationKnowledgeBase } from '../src/knowledge'
+import { deepGuideDemoPresentationKnowledge } from '../src/fixtures/deepGuideDemoPresentationKnowledge'
 
 const props = { appearance: 'light' as const, accent: 'blue' as const, onAppearance: vi.fn(), onAccent: vi.fn(), onReturn: vi.fn(), onReanalyse: vi.fn() }
 
@@ -30,5 +31,14 @@ describe('provider-independent presentation schema', () => {
     expect(markup).toContain('View code evidence')
     expect(markup).toContain('Copy excerpt')
     expect(markup).toContain('Static import')
+  })
+
+  it('uses the production workspace for the deterministic deep-guide fixture', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={deepGuideDemoPresentationKnowledge} {...props} />)
+    expect(markup).toContain('Test/demo report fixture')
+    expect(markup).toContain('src/services/')
+    expect(markup).toContain('src/services/userService.ts')
+    expect(markup).toContain('entrypoint')
+    expect(markup).toContain('Project glossary')
   })
 })
