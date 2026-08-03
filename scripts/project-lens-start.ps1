@@ -14,7 +14,9 @@ function Wait-Http($Url, $Name, $Seconds = 30) {
   Fail "$Name did not become ready at $Url. Check $Runtime."
 }
 function PortOwner($Port) {
-  try { return Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess } catch { return $null }
+  $line = netstat -ano | Select-String -Pattern "LISTENING\s+\d+$" | Where-Object { $_.Line -match ":$Port\s" } | Select-Object -First 1
+  if ($line -and $line.Line -match '(\d+)$') { return [int]$Matches[1] }
+  return $null
 }
 
 if (-not (Test-Path (Join-Path $Root 'node_modules'))) { Fail 'Dependencies are not installed. Run setup-project-lens.bat first.' }
