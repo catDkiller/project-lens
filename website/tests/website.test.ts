@@ -40,4 +40,14 @@ describe('public website replacement', () => {
     expect(html).toContain('INPUT.maxVelocity')
     expect(html).not.toContain('go(clamp(closest()+direction,0,N-1))')
   })
+
+  it('commits one physical valley transition and keeps GitHub semantic', async () => {
+    const html = await readFile(path.join(root, 'index.html'), 'utf8')
+    expect(html).toContain("motionState='idle'")
+    expect(html).toContain('commitTransition(direction)')
+    expect(html).toContain('transitionTarget!==null')
+    expect(html).toContain('link.dataset.terrainInteractionIgnore')
+    expect(html).toContain('href="https://github.com/catDkiller/project-lens"')
+    expect(html).toContain('rel="noreferrer"')
+  })
 })
