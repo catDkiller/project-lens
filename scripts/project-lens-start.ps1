@@ -30,7 +30,9 @@ $daemon = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',"npm run dae
 $health = Wait-Http 'http://127.0.0.1:8787/api/runtime/health' 'daemon'
 $web = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',"npm run dev:web -- --host 127.0.0.1 > `"$WebLog`" 2>&1" -WorkingDirectory $Root -PassThru -WindowStyle Hidden
 Wait-Http 'http://127.0.0.1:5173/' 'frontend'
-@{ daemonPid = $daemon.Id; frontendPid = $web.Id; root = $Root; startedAt = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content $StatePath
+$daemonProcessPid = (Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
+$frontendProcessPid = (Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)
+@{ daemonPid = $daemon.Id; frontendPid = $web.Id; daemonProcessPid = $daemonProcessPid; frontendProcessPid = $frontendProcessPid; root = $Root; startedAt = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content $StatePath
 Start-Process 'http://127.0.0.1:5173'
 Write-Host 'Project Lens is ready at http://127.0.0.1:5173/' -ForegroundColor Green
 Write-Host 'Stop with stop-project-lens.bat' -ForegroundColor Green

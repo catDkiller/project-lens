@@ -4,7 +4,7 @@ $Runtime = Join-Path $Root '.project-lens\launcher'
 $StatePath = Join-Path $Runtime 'processes.json'
 if (-not (Test-Path $StatePath)) { Write-Host 'Project Lens is already stopped.'; exit 0 }
 $state = Get-Content $StatePath -Raw | ConvertFrom-Json
-$roots = @($state.daemonPid, $state.frontendPid) | Where-Object { $_ -as [int] }
+$roots = @($state.daemonPid, $state.frontendPid, $state.daemonProcessPid, $state.frontendProcessPid) | Where-Object { $_ -as [int] }
 $all = New-Object System.Collections.Generic.HashSet[int]
 foreach ($rootPid in $roots) {
   $queue = New-Object System.Collections.Queue; $queue.Enqueue([int]$rootPid)
