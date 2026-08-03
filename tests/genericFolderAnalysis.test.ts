@@ -4,7 +4,7 @@ import { createProjectKnowledgeBase, createCodexEvidencePrompt, buildPresentatio
 import type { NormalizedProject } from '../src/project-sources/types'
 
 const python: NormalizedProject = { id: 'python-tool', name: 'Python Tool', framework: 'Python', files: [{ path: 'pyproject.toml', content: '[project]\ndependencies=["requests"]' }, { path: 'app/main.py', content: 'import requests\nprint("hello")' }, { path: 'tests/test_main.py', content: 'def test_main(): pass' }] }
-const typescript: NormalizedProject = { id: 'ts-service', name: 'TypeScript Service', framework: 'JavaScript/TypeScript', files: [{ path: 'package.json', content: '{"dependencies":{"express":"1.0.0"}}' }, { path: 'src/server.ts', content: 'import express from "express"\nexport const app = express()' }, { path: 'src/index.ts', content: 'import { app } from "./server"' }] }
+const typescript: NormalizedProject = { id: 'ts-service', name: 'TypeScript Service', framework: 'JavaScript/TypeScript', files: [{ path: 'package.json', content: '{"scripts":{"dev":"vite","build":"tsc -b && vite build"},"dependencies":{"express":"1.0.0"}}' }, { path: 'src/server.ts', content: 'import express from "express"\nexport const app = express()' }, { path: 'src/index.ts', content: 'import { app } from "./server"' }] }
 
 async function knowledge(project: NormalizedProject) { return createProjectKnowledgeBase(await runProjectAnalysis(project, [], () => undefined), [], 'Selected folder') }
 
@@ -29,6 +29,14 @@ describe('generic selected-folder evidence', () => {
     expect(result.projectName).toBe('TypeScript Service')
     expect(result.projectTypeLabel).toBe('JavaScript/TypeScript')
     expect(result.files?.map((file) => file.path)).toEqual(expect.arrayContaining(['package.json', 'src/index.ts']))
+  })
+
+  it('derives beginner-facing commands and startup flow from confirmed package and entry evidence', async () => {
+    const base = await knowledge(typescript)
+    const presentation = buildPresentationKnowledgeBase(base)
+    expect(base.commands?.map((item) => item.command)).toEqual(['npm run build', 'npm run dev'])
+    expect(presentation.sections?.find((section) => section.id === 'commands')?.items?.[0]?.explanation).toContain('package.json')
+    expect(presentation.sections?.find((section) => section.id === 'how-it-works')?.items?.[0]?.relatedEvidence?.[0]?.path).toBe('src/index.ts')
   })
 
   it('discards optional Codex paths that are not in the selected-folder manifest', async () => {

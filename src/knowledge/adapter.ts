@@ -69,6 +69,15 @@ function dependencyNames(files: ProjectAnalysis['inventory']['files']) {
   return [...new Set(names)].sort().slice(0, 30)
 }
 
+function projectCommands(files: ProjectAnalysis['inventory']['files']) {
+  const manifest = files.find((file) => /(^|\/)package\.json$/i.test(file.path))
+  if (!manifest) return []
+  try {
+    const scripts = (JSON.parse(manifest.content) as { scripts?: Record<string, unknown> }).scripts ?? {}
+    return Object.entries(scripts).filter((entry): entry is [string, string] => typeof entry[1] === 'string').sort(([left], [right]) => left.localeCompare(right)).slice(0, 12).map(([name, command]) => ({ command: `npm run ${name}`, description: `Runs \`${command}\`, defined in ${manifest.path}.` }))
+  } catch { return [] }
+}
+
 function makePart(id: string, name: string, files: ProjectItem[], analysis: ProjectAnalysis): ProjectPart {
   const relationships = analysis.relationships.filter((relationship) => files.some((file) => file.path === relationship.fromPath)).slice(0, 20).map((relationship) => `${relationship.fromPath} imports ${relationship.specifier}${relationship.resolvedPath ? ` → ${relationship.resolvedPath}` : ''}.`)
   const example = files.find((file) => file.optionalPreview)
@@ -89,8 +98,9 @@ export function createProjectKnowledgeBase(analysis: ProjectAnalysis, packs: Fea
   }
   const languages = [...new Set(analysis.inventory.files.map((file) => languageFor(file.path)).filter(Boolean))].sort() as string[]
   const dependencies = dependencyNames(analysis.inventory.files)
+  const commands = projectCommands(analysis.inventory.files)
   const technologies = [...new Set([analysis.project.framework, ...dependencies])].filter((value) => value && value !== 'Software project').slice(0, 40)
   const learningOrder = projectParts.map((part, index) => ({ order: index + 1, topic: part.name, reason: `Start with the evidence-backed ${part.name.toLowerCase()} area.`, partId: part.id }))
   const fingerprint = sourceFingerprint(analysis.project, analysis.inventory.files)
-  return { id: analysis.project.id, name: analysis.project.name, sourceType, category: analysis.project.framework, summary: `${analysis.project.name} contains ${analysis.inventory.files.length} analysed files across ${languages.join(', ') || 'an undetermined language set'}.`, purpose: 'Understand the selected project structure and implementation choices before reusing them.', metadata: [{ label: 'Project type', value: analysis.project.framework }, { label: 'Analysed files', value: String(analysis.inventory.files.length) }, { label: 'Static imports', value: String(analysis.importCount) }, { label: 'Source fingerprint', value: fingerprint.slice(0, 12) }], detectedLanguages: languages, detectedFrameworks: analysis.project.framework === 'Software project' ? [] : [analysis.project.framework], technologies, projectParts, importantFiles, learningOrder, technicalEvidence: [`${analysis.importCount} static import relationships were inspected.`], limitations: ['Static import analysis currently supports JavaScript, JSX, TypeScript, and TSX. Dynamic imports, aliases, and package internals are not inspected.', 'Evidence is bounded to selected readable text files. Binary content and generated output are not inspected.'], analysisCoverage: { analysed: analysis.inventory.files.length, detected: projectParts.length, skipped: 0, unsupported: 0 }, sourceFingerprint: fingerprint }
+  return { id: analysis.project.id, name: analysis.project.name, sourceType, category: analysis.project.framework, summary: `${analysis.project.name} contains ${analysis.inventory.files.length} analysed files across ${languages.join(', ') || 'an undetermined language set'}.`, purpose: 'Understand the selected project as a working system before changing it.', metadata: [{ label: 'Project type', value: analysis.project.framework }, { label: 'Analysed files', value: String(analysis.inventory.files.length) }, { label: 'Static imports', value: String(analysis.importCount) }, { label: 'Source fingerprint', value: fingerprint.slice(0, 12) }], detectedLanguages: languages, detectedFrameworks: analysis.project.framework === 'Software project' ? [] : [analysis.project.framework], technologies, projectParts, importantFiles, commands, learningOrder, technicalEvidence: [`${analysis.importCount} static import relationships were inspected.`], limitations: ['Static import analysis currently supports JavaScript, JSX, TypeScript, and TSX. Dynamic imports, aliases, and package internals are not inspected.', 'Evidence is bounded to selected readable text files. Binary content and generated output are not inspected.'], analysisCoverage: { analysed: analysis.inventory.files.length, detected: projectParts.length, skipped: 0, unsupported: 0 }, sourceFingerprint: fingerprint }
 }
