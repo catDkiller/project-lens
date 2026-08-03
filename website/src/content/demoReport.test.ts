@@ -7,5 +7,6 @@ describe('public demo content', () => {
     expect(publicCopy).toContain('mental model')
     expect(demoReport.overview.items).toHaveLength(4)
     expect(demoReport.guide.items).toHaveLength(5)
+    expect(demoReport.parts.every((part) => part.files.length > 0)).toBe(true)
   })
 })

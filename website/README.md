@@ -2,6 +2,11 @@
 
 This independent Vite site is the static public story for Project Lens. It has no daemon, account, or environment requirement.
 
+The report preview is a preserved, static presentation of the product’s
+Overview and Complete Guide reading model. It does not claim to analyse the
+visitor’s project or provide live uploads. See [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)
+for the public visual and interaction rules.
+
 ## Local development
 
 ```bash
