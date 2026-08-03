@@ -9,7 +9,7 @@ import { buildReportFromValidatedArtifacts, createProjectKnowledgeBase, REPORT_B
 import type { PresentationKnowledgeBase } from '../knowledge'
 import type { AnalysisEventDto, AnalysisRunState, AnalysisRunStatusDto } from './contracts'
 import { redact } from './codex'
-import { buildCodexArgs, readRequiredArtifacts, resolveCodexCli, runCodexCli, stageRun } from './codexCli'
+import { buildCodexArgs, isConfirmedModel, readRequiredArtifacts, resolveCodexCli, runCodexCli, stageRun } from './codexCli'
 import { acceptsLocalPath, classifyLocalPath, localProject, prepareLocalFiles, type LocalSkipReason } from '../project-sources/localFolderImport'
 import { assessLocalProject } from '../project-sources/support'
 import { ARTIFACT_VALIDATOR_VERSION, PERSISTED_RUN_SCHEMA_VERSION, PROJECT_LENS_API_VERSION } from '../runtimeVersion'
@@ -103,7 +103,7 @@ async function execute(run: Run) {
   const totalBytes = project.files.reduce((total, file) => total + Buffer.byteLength(file.content), 0)
   event(run, { type: 'preparing-evidence', stage: 'snapshot', status: 'complete', message: `Snapshot ready · ${project.files.length} files · ${formatBytes(totalBytes)}.`, progress: { current: totalBytes, total: totalBytes, unit: 'bytes', percentage: 100 }, metadata: { includedFiles: project.files.length, processedBytes: totalBytes } })
   event(run, { type: 'preparing-evidence', stage: 'codex-preparation', status: 'complete', message: 'Project Lens instructions and manifest staged.' })
-  const metadata: Record<string, unknown> = { runId: run.runId, selectedFolder: run.sourcePath ?? 'prepared sample', projectName: project.name, sourceFingerprint: raw.sourceFingerprint, sourceSnapshotHash: sourceHash(project.files), includedFileCount: project.files.length, skippedFileCount: 0, includedByteCount: project.files.reduce((total, file) => total + Buffer.byteLength(file.content), 0), detectedLanguages: raw.detectedLanguages, startedAt: run.createdAt, codex: { executable: codex.executable, version: codex.version, model: run.model ?? 'automatic' }, state: 'running', artifactState: 'pending' }
+  const metadata: Record<string, unknown> = { runId: run.runId, selectedFolder: run.sourcePath ?? 'prepared sample', projectName: project.name, sourceFingerprint: raw.sourceFingerprint, sourceSnapshotHash: sourceHash(project.files), includedFileCount: project.files.length, skippedFileCount: 0, includedByteCount: project.files.reduce((total, file) => total + Buffer.byteLength(file.content), 0), detectedLanguages: raw.detectedLanguages, startedAt: run.createdAt, codex: { executable: codex.executable, version: codex.version, model: run.model }, state: 'running', artifactState: 'pending' }
   await writeRunMetadata(staged.directory, metadata)
   try {
     setState(run, 'running'); event(run, { type: 'run_started', stage: 'codex-analysis', status: 'active', message: `Starting Codex${run.model ? ` · ${run.model}` : ''}.`, metadata: { includedFiles: project.files.length, processedBytes: totalBytes, selectedModel: run.model } })
@@ -162,9 +162,15 @@ export const daemon = createServer(async (req, res) => {
     try {
       const parsed = JSON.parse(await body(req, 14_000_000)) as { name?: string; projectType?: string; files?: { path: string; content: string }[]; model?: string; sourcePath?: string }
       const local = url.pathname.endsWith('/local') || (url.pathname === '/api/runs' && Array.isArray(parsed.files))
+      const requestedModel = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim() : undefined
+      if (!requestedModel) return send(res, 400, { error: 'Choose a confirmed Codex model before analysing.' })
+      const readiness = await resolveCodexCli()
+      if (!('executable' in readiness)) return send(res, 503, { error: readiness.error })
+      if (!readiness.signedIn) return send(res, 503, { error: 'Sign in to Codex before analysing a project.' })
+      if (!isConfirmedModel(readiness.models, requestedModel)) return send(res, 400, { error: `The selected Codex model “${requestedModel}” is not available for this account. Choose another discovered model.` })
       const project = local ? localProject(parsed.name ?? 'Local project', prepareLocalFiles((parsed.files ?? []).map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength }))).files, parsed.projectType ?? 'Software project') : undefined
       if (local && !project?.files.length) return send(res, 400, { error: 'No supported project text files were included.' })
-      const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: typeof parsed.model === 'string' ? parsed.model : undefined, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined, sourcePath: local && typeof parsed.sourcePath === 'string' ? parsed.sourcePath : undefined }
+      const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: requestedModel, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined, sourcePath: local && typeof parsed.sourcePath === 'string' ? parsed.sourcePath : undefined }
       run.workerScheduledAt = new Date().toISOString(); runs.set(run.runId, run); event(run, { type: 'queued', stage: 'preparing', status: 'pending', message: 'Run created.' }); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Selected project accepted.' }); run.workerWatchdog = setTimeout(() => { if (!run.workerStartedAt && !run.terminalOutcome) void fail(run, Object.assign(new Error('The local analysis worker did not start within 15 seconds.'), { code: 'worker-start-timeout' })) }, WORKER_START_TIMEOUT_MS); void (async () => { run.workerStartedAt = new Date().toISOString(); if (run.workerWatchdog) clearTimeout(run.workerWatchdog); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Local analysis worker started.' }); await execute(run) })().catch(async (error) => { await fail(run, error) }); return send(res, 202, { runId: run.runId })
     } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Invalid analysis request.' }) }
   }

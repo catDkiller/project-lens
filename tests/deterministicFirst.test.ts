@@ -13,8 +13,8 @@ describe('deterministic-first selected folder flow', () => {
     expect(validatePresentationKnowledgeBase(presentation, base)).toEqual([])
     expect(presentation.projectName).toBe('Real folder')
     expect(presentation.sourceFingerprint).toBe(base.sourceFingerprint)
-    expect(deriveLauncherState({ status: 'unavailable', error: 'No Codex' }, { kind: 'local', name: 'Real folder', support: 'supported' }, 'automatic').canAnalyse).toBe(true)
-    expect(deriveLauncherState({ status: 'sign-in-required' }, { kind: 'local', name: 'Real folder', support: 'supported' }, 'automatic').canAnalyse).toBe(true)
+    expect(deriveLauncherState({ status: 'unavailable', error: 'No Codex', models: [] }, { kind: 'local', name: 'Real folder', support: 'supported' }, undefined).canAnalyse).toBe(false)
+    expect(deriveLauncherState({ status: 'ready', models: ['gpt-5.4-mini'] }, { kind: 'local', name: 'Real folder', support: 'supported' }, 'gpt-5.4-mini').canAnalyse).toBe(true)
   })
 
   it('keeps deterministic identity and ignores Codex paths outside the active manifest', async () => {

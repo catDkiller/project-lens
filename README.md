@@ -42,6 +42,14 @@ Lens stores local runs under `.project-lens/`; this directory is ignored by
 Git. To clear only local runtime data, stop Project Lens and remove
 `.project-lens/`. Do not delete the repository as part of a normal update.
 
+Project Lens uses the models that the signed-in Codex account reports through
+`codex debug models`. The launcher never submits an implicit `automatic` model:
+choose one of the discovered account-compatible models before analysing. A
+saved model is kept only while it is still discovered; otherwise the launcher
+selects a known compatible recommendation or asks you to choose one. The local
+daemon repeats this check immediately before creating a run, so stale or
+unsupported model IDs fail without sending a request.
+
 To update safely: stop Project Lens, pull the latest Git changes, run setup
 again, run the doctor, then start Project Lens. Setup is idempotent.
 

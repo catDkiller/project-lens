@@ -13,6 +13,7 @@ export { classifyArtifactReference, normalizeArtifactPath, readRequiredArtifacts
 const require = createRequire(import.meta.url)
 export type CodexRuntimeEvent = { type: 'thread_started' | 'status' | 'reasoning' | 'text_delta' | 'tool_call' | 'tool_result' | 'file_write' | 'usage' | 'warning' | 'error' | 'process_exited'; message?: string; threadId?: string; raw?: Record<string, unknown> }
 export type CodexCliProbe = { executable: string; version: string; signedIn: boolean; models: string[] }
+export function isConfirmedModel(models: string[], model: string | undefined) { return Boolean(model && model !== 'automatic' && models.includes(model)) }
 
 async function command(executable: string, args: string[]) { return await new Promise<{ code: number | null; stdout: string }>((resolve) => { const child = spawn(executable, args, { shell: false, windowsHide: true }); let stdout = ''; child.stdout.on('data', (chunk: Buffer) => { stdout = (stdout + chunk).slice(0, 2_000_000) }); child.once('error', () => resolve({ code: null, stdout })); child.once('close', (code) => resolve({ code, stdout })) }) }
 export async function resolveCodexCli(): Promise<CodexCliProbe | { error: string }> {
@@ -29,7 +30,7 @@ export async function resolveCodexCli(): Promise<CodexCliProbe | { error: string
     if (candidate.replaceAll('\\', '/').includes('/.codex/plugins/.plugin-appserver/')) continue
     const [version, auth, models] = await Promise.all([command(candidate, ['--version']), command(candidate, ['login', 'status']), command(candidate, ['debug', 'models'])])
     if (version.code !== 0) continue
-    const parsed = (() => { try { const value = JSON.parse(models.stdout) as { models?: Array<{ slug?: string; id?: string; visibility?: string }> }; return (value.models ?? []).filter((model) => model.visibility !== 'hidden').map((model) => model.slug ?? model.id ?? '').filter(Boolean) } catch { return [] } })()
+    const parsed = (() => { try { const value = JSON.parse(models.stdout) as { models?: Array<{ slug?: string; id?: string; visibility?: string; supported_in_api?: boolean }> }; return (value.models ?? []).filter((model) => model.visibility !== 'hidden' && model.supported_in_api !== false).map((model) => model.slug ?? model.id ?? '').filter(Boolean) } catch { return [] } })()
     return { executable: candidate, version: version.stdout.trim(), signedIn: auth.code === 0, models: parsed }
   }
   return { error: 'Codex CLI is unavailable.' }
