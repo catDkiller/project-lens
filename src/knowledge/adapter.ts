@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { ProjectAnalysis } from '../analysis'
 import type { FeatureLearningPack } from '../learning'
-import type { ProjectItem, ProjectKnowledgeBase, ProjectPart } from './types'
+import type { ProjectItem, ProjectKnowledgeBase, ProjectPart, ProjectSymbol } from './types'
 
 const excerptLimit = 2_000
 
@@ -78,6 +78,33 @@ function projectCommands(files: ProjectAnalysis['inventory']['files']) {
   } catch { return [] }
 }
 
+const maximumSymbolsPerFile = 20
+const maximumSymbolsPerProject = 200
+
+/**
+ * This intentionally extracts only line-based public declarations. It does not
+ * claim to parse calls, scopes, or dynamic JavaScript/Python syntax.
+ */
+function extractSymbols(files: ProjectAnalysis['inventory']['files']): ProjectSymbol[] {
+  const symbols: ProjectSymbol[] = []
+  for (const file of files) {
+    if (!/\.(?:[cm]?[jt]sx?|py)$/i.test(file.path)) continue
+    let count = 0
+    for (const [index, line] of file.content.split(/\r?\n/).entries()) {
+      if (count >= maximumSymbolsPerFile || symbols.length >= maximumSymbolsPerProject) break
+      const match = /^(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*(\([^)]*\))|^(?:export\s+(?:default\s+)?)?class\s+([A-Za-z_$][\w$]*)|^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=|^(?:async\s+)?def\s+([A-Za-z_]\w*)\s*(\([^)]*\))|^class\s+([A-Za-z_]\w*)/u.exec(line.trim())
+      if (!match) continue
+      const name = match[1] ?? match[3] ?? match[4] ?? match[5] ?? match[7]
+      if (!name) continue
+      const kind: ProjectSymbol['kind'] = (match[3] || match[7]) ? 'class' : match[4] ? 'constant' : (/^[A-Z]/u.test(name) && /\.(?:[jt]sx?)$/i.test(file.path) ? 'component' : 'function')
+      const signature = match[1] ? `${name}${match[2]}` : match[5] ? `${name}${match[6]}` : line.trim().slice(0, 160)
+      symbols.push({ name, kind, signature, path: file.path, line: index + 1, analysisStatus: 'analysed' })
+      count += 1
+    }
+  }
+  return symbols.sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line || left.name.localeCompare(right.name))
+}
+
 function makePart(id: string, name: string, files: ProjectItem[], analysis: ProjectAnalysis): ProjectPart {
   const relationships = analysis.relationships.filter((relationship) => files.some((file) => file.path === relationship.fromPath)).slice(0, 20).map((relationship) => `${relationship.fromPath} imports ${relationship.specifier}${relationship.resolvedPath ? ` → ${relationship.resolvedPath}` : ''}.`)
   const example = files.find((file) => file.optionalPreview)
@@ -86,12 +113,13 @@ function makePart(id: string, name: string, files: ProjectItem[], analysis: Proj
 
 export function createProjectKnowledgeBase(analysis: ProjectAnalysis, packs: FeatureLearningPack[] = [], sourceType = 'Software project'): ProjectKnowledgeBase {
   const selected = selectImportantFiles(analysis.inventory.files)
-  const importantFiles: ProjectItem[] = selected.map((file) => ({ id: file.path, path: file.path, itemType: itemType(file.path), purpose: isManifest(file.path) ? 'Dependency or project configuration evidence.' : isEntry(file.path) ? 'Likely project entry point.' : isDocumentation(file.path) ? 'Project documentation evidence.' : 'Selected evidence file.', analysisStatus: 'analysed', optionalPreview: file.content.slice(0, excerptLimit) }))
+  const importantFiles: ProjectItem[] = selected.map((file) => ({ id: file.path, path: file.path, itemType: itemType(file.path), purpose: isManifest(file.path) ? 'Dependency or project configuration evidence.' : isEntry(file.path) ? 'Likely project entry point.' : isDocumentation(file.path) ? 'Project documentation evidence.' : 'Readable project file selected for closer inspection.', analysisStatus: 'analysed', optionalPreview: file.content.slice(0, excerptLimit) }))
   const packsById = new Map(packs.map((pack) => [pack.featureId, pack]))
-  const groups: Array<[string, string, (file: ProjectItem) => boolean]> = [['entry-points', 'Entry points', (file) => isEntry(file.path)], ['configuration', 'Configuration and dependencies', (file) => isManifest(file.path)], ['documentation', 'Documentation', (file) => isDocumentation(file.path)], ['tests', 'Tests', (file) => isTest(file.path)]]
+  const groups: Array<[string, string, (file: ProjectItem) => boolean]> = [['entry-points', 'Entry points', (file) => isEntry(file.path)], ['application-interface', 'Application interface', (file) => /(^|\/)(components?|pages?|views?)(\/|$)|\/(App)\.[jt]sx?$/i.test(file.path)], ['services', 'Service logic', (file) => /(^|\/)(services?|api|clients?)(\/|$)/i.test(file.path)], ['configuration', 'Configuration and dependencies', (file) => isManifest(file.path)], ['documentation', 'Documentation', (file) => isDocumentation(file.path)], ['tests', 'Tests', (file) => isTest(file.path)]]
   const projectParts: ProjectPart[] = []
   for (const [id, name, predicate] of groups) { const files = importantFiles.filter(predicate); if (files.length) projectParts.push(makePart(id, name, files, analysis)) }
-  const grouped = new Set(projectParts.flatMap((part) => part.relevantFiles?.map((file) => file.path) ?? [])); const remaining = importantFiles.filter((file) => !grouped.has(file.path)); if (remaining.length) projectParts.push(makePart('source-structure', 'Source structure', remaining, analysis))
+  // Unclassified files remain available in the repository tree instead of being
+  // assigned a vague responsibility from their filename alone.
   for (const feature of analysis.features) {
     const pack = packsById.get(feature.featureId); const relevantFiles = feature.relevantFiles.map((file) => importantFiles.find((item) => item.path === file.path)).filter((item): item is ProjectItem => Boolean(item)); if (!relevantFiles.length) continue
     projectParts.push({ ...makePart(feature.featureId, feature.label, relevantFiles, analysis), plainPurpose: pack?.summary ?? `Evidence-backed files related to ${feature.label}.`, canonicalTopics: pack?.concepts.map((concept) => ({ name: concept.canonicalName, explanation: concept.plainExplanation, whyItExists: concept.whyItExists, evidenceFiles: concept.evidenceFiles })), essentialDecisions: pack?.complexityItems.filter((item) => item.classification === 'essential').map((item) => ({ title: item.title, note: item.explanation })), reviewItems: pack?.complexityItems.filter((item) => item.classification === 'review-before-copy').map((item) => ({ title: item.title, note: item.explanation })), learningTopics: pack?.learningSteps, technicalEvidence: feature.evidence.length ? [{ confidence: feature.confidence, facts: feature.evidence.map((item) => `${item.path}: ${item.fact}`) }] : undefined })
@@ -100,8 +128,9 @@ export function createProjectKnowledgeBase(analysis: ProjectAnalysis, packs: Fea
   const dependencies = dependencyNames(analysis.inventory.files)
   const commands = projectCommands(analysis.inventory.files)
   const relationships = analysis.relationships.filter((item) => item.resolution === 'resolved' && item.resolvedPath).map((item) => ({ fromPath: item.fromPath, toPath: item.resolvedPath!, type: 'imports' as const, status: 'analysed' as const })).sort((left, right) => left.fromPath.localeCompare(right.fromPath) || left.toPath.localeCompare(right.toPath))
+  const symbols = extractSymbols(analysis.inventory.files)
   const technologies = [...new Set([analysis.project.framework, ...dependencies])].filter((value) => value && value !== 'Software project').slice(0, 40)
   const learningOrder = projectParts.map((part, index) => ({ order: index + 1, topic: part.name, reason: `Start with the evidence-backed ${part.name.toLowerCase()} area.`, partId: part.id }))
   const fingerprint = sourceFingerprint(analysis.project, analysis.inventory.files)
-  return { id: analysis.project.id, name: analysis.project.name, sourceType, category: analysis.project.framework, summary: `${analysis.project.name} contains ${analysis.inventory.files.length} analysed files across ${languages.join(', ') || 'an undetermined language set'}.`, purpose: 'Understand the selected project as a working system before changing it.', metadata: [{ label: 'Project type', value: analysis.project.framework }, { label: 'Analysed files', value: String(analysis.inventory.files.length) }, { label: 'Static imports', value: String(analysis.importCount) }, { label: 'Source fingerprint', value: fingerprint.slice(0, 12) }], detectedLanguages: languages, detectedFrameworks: analysis.project.framework === 'Software project' ? [] : [analysis.project.framework], technologies, projectParts, importantFiles, commands, relationships, learningOrder, technicalEvidence: [`${analysis.importCount} static import relationships were inspected.`], limitations: ['Static import analysis currently supports JavaScript, JSX, TypeScript, and TSX. Dynamic imports, aliases, and package internals are not inspected.', 'Evidence is bounded to selected readable text files. Binary content and generated output are not inspected.'], analysisCoverage: { analysed: analysis.inventory.files.length, detected: projectParts.length, skipped: 0, unsupported: 0 }, sourceFingerprint: fingerprint }
+  return { id: analysis.project.id, name: analysis.project.name, sourceType, category: analysis.project.framework, summary: `${analysis.project.name} contains ${analysis.inventory.files.length} analysed files across ${languages.join(', ') || 'an undetermined language set'}.`, purpose: 'Understand the selected project as a working system before changing it.', metadata: [{ label: 'Project type', value: analysis.project.framework }, { label: 'Analysed files', value: String(analysis.inventory.files.length) }, { label: 'Static imports', value: String(analysis.importCount) }, { label: 'Source fingerprint', value: fingerprint.slice(0, 12) }], detectedLanguages: languages, detectedFrameworks: analysis.project.framework === 'Software project' ? [] : [analysis.project.framework], technologies, projectParts, importantFiles, commands, relationships, symbols, learningOrder, technicalEvidence: [`${analysis.importCount} static import relationships were inspected.`], limitations: ['Static import analysis currently supports JavaScript, JSX, TypeScript, and TSX. Dynamic imports, aliases, and package internals are not inspected.', 'Declaration extraction is bounded to simple top-level JavaScript, TypeScript, JSX, TSX, and Python declarations. It does not resolve calls or scopes.', 'Evidence is bounded to selected readable text files. Binary content and generated output are not inspected.'], analysisCoverage: { analysed: analysis.inventory.files.length, detected: projectParts.length, skipped: 0, unsupported: 0 }, sourceFingerprint: fingerprint }
 }

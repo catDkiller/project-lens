@@ -1,4 +1,4 @@
-import type { AnalysisStatus, ProjectItemType } from './types'
+import type { AnalysisStatus, ProjectItemType, ProjectSymbol } from './types'
 
 export interface EvidenceReference {
   path: string
@@ -74,6 +74,9 @@ export interface PresentationKnowledgeBase {
   learningPath?: PresentationItem[]
   limitations?: PresentationSection
   technicalReference?: PresentationSection[]
+  /** Confirmed static file edges only; these are not function-call edges. */
+  relationships?: { fromPath: string; toPath: string; type: 'imports'; status: 'analysed' }[]
+  symbols?: ProjectSymbol[]
   overviewMarkdown?: string
   completeGuideMarkdown?: string
 }

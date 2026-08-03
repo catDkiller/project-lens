@@ -1084,4 +1084,20 @@ summary {
  .report-flow li::marker, .report-reading li::marker { color: var(--accent); font-weight: 700; }
  .report-gaps { margin-top: 2rem; padding: 1rem 1.2rem; border-left: 2px solid var(--accent); background: var(--surface-raised); }
  .report-coverage { margin-top: 2rem; }
- .report-contents { position: sticky; top: 1rem; z-index: 1; background: var(--page); padding: .5rem 0; }
+.report-contents { position: sticky; top: 1rem; z-index: 1; background: var(--page); padding: .5rem 0; }
+.project-tree, .connection-list, .symbol-list { display: grid; gap: .6rem; list-style: none; margin: 1rem 0; padding: 0; }
+.project-tree > li { border-left: 2px solid var(--accent-border); display: grid; gap: .25rem; padding-left: .8rem; }
+.project-tree span { color: var(--fg-secondary); font-size: .86rem; }
+.project-tree ul { display: grid; gap: .3rem; list-style: none; margin: .3rem 0 0; padding: 0; }
+.project-tree button, .connection-list button, .symbol-list button { background: transparent; border: 0; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; padding: .25rem; text-align: left; }
+.project-tree button:hover, .connection-list button:hover, .symbol-list button:hover { background: var(--accent-light); color: var(--heading-secondary); }
+.connection-list li { align-items: center; background: var(--surface); border-radius: var(--radius-sm); display: flex; flex-wrap: wrap; gap: .15rem; padding: .65rem; }
+.connection-list em { color: var(--success); font-size: .72rem; font-style: normal; font-weight: 700; margin-left: auto; }
+.symbol-list li { background: var(--surface); border-left: 3px solid var(--secondary-accent); border-radius: var(--radius-sm); }
+.symbol-list button { display: grid; gap: .2rem; padding: .7rem; width: 100%; }
+.symbol-list span { color: var(--muted); font-size: .78rem; }
+.map-detail { background: var(--surface); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); margin-top: 1rem; padding: 1rem; }
+.map-detail h3 code { overflow-wrap: anywhere; }
+.map-detail h4 { font-size: .86rem; margin: 1rem 0 .4rem; }
+.map-detail li { margin-bottom: .35rem; overflow-wrap: anywhere; }
+@media (max-width: 48rem) { .connection-list li { align-items: flex-start; flex-direction: column; } .connection-list em { margin-left: 0; } }

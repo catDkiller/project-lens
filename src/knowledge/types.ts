@@ -15,6 +15,16 @@ export interface ProjectItem {
   optionalPreview?: string
 }
 
+/** A bounded declaration found directly in a supported text source file. */
+export interface ProjectSymbol {
+  name: string
+  kind: 'function' | 'class' | 'component' | 'constant'
+  signature: string
+  path: string
+  line: number
+  analysisStatus: 'analysed'
+}
+
 export interface ProjectPart {
   id: string
   name: string
@@ -48,6 +58,7 @@ export interface ProjectKnowledgeBase {
   importantFiles?: ProjectItem[]
   commands?: { command: string; description: string }[]
   relationships?: { fromPath: string; toPath: string; type: 'imports'; status: 'analysed' }[]
+  symbols?: ProjectSymbol[]
   decisions?: { title: string; note: string; status: 'review' | 'essential' }[]
   learningOrder?: { order: number; topic: string; reason: string; partId?: string }[]
   technicalEvidence?: string[]

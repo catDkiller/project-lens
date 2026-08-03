@@ -17,4 +17,14 @@ describe('provider-independent presentation schema', () => {
     expect(markup).toContain(knowledge.projectName)
     expect(markup).toContain(knowledge.projectTypeLabel)
   })
+
+  it('renders bounded relationship and declaration views from deterministic evidence', () => {
+    const markup = renderToStaticMarkup(<KnowledgeWorkspace knowledge={{ version: '1.0', projectName: 'Small tool', files: [{ path: 'src/main.ts', explanation: 'Likely project entry point.' }, { path: 'src/service.ts', explanation: 'Provides the imported service.' }], projectParts: [{ id: 'entry', title: 'Entry points', relatedFiles: ['src/main.ts'] }], relationships: [{ fromPath: 'src/main.ts', toPath: 'src/service.ts', type: 'imports', status: 'analysed' }], symbols: [{ name: 'run', kind: 'function', signature: 'run()', path: 'src/main.ts', line: 3, analysisStatus: 'analysed' }] }} {...props} />)
+    expect(markup).toContain('Evidence-backed project map')
+    expect(markup).toContain('Responsibility tree')
+    expect(markup).toContain('Repository tree')
+    expect(markup).toContain('File connections')
+    expect(markup).toContain('Important symbols')
+    expect(markup).toContain('does not claim to be a call graph')
+  })
 })

@@ -39,6 +39,10 @@ describe('generic selected-folder evidence', () => {
     expect(presentation.sections?.find((section) => section.id === 'how-it-works')?.items?.[0]?.relatedEvidence?.[0]?.path).toBe('src/index.ts')
     expect(base.relationships).toEqual([{ fromPath: 'src/index.ts', toPath: 'src/server.ts', type: 'imports', status: 'analysed' }])
     expect(presentation.technicalReference?.find((section) => section.id === 'verified-file-communication')?.importRelationships).toEqual(['src/index.ts imports src/server.ts'])
+    expect(base.symbols).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'app', kind: 'constant', path: 'src/server.ts', line: 2 })]))
+    expect(presentation.relationships).toEqual(base.relationships)
+    expect(presentation.symbols).toEqual(base.symbols)
+    expect(base.projectParts?.map((part) => part.id)).not.toContain('source-structure')
   })
 
   it('discards optional Codex paths that are not in the selected-folder manifest', async () => {
