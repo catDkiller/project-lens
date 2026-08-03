@@ -32,6 +32,14 @@ describe('public website replacement', () => {
     expect(config).toContain('project-lens-demo.mp4')
   })
 
+  it('keeps both GitHub actions clickable above the terrain', async () => {
+    const html = await readFile(path.join(root, 'index.html'), 'utf8')
+    expect((html.match(/href="https:\/\/github\.com\/catDkiller\/project-lens"/g) ?? []).length).toBe(1)
+    expect(html).toContain(".mini a[href^=\"https://github.com/\"]")
+    expect(html).toContain("link.dataset.terrainInteractionIgnore=''")
+    expect(html).toContain("link.rel='noopener noreferrer'")
+  })
+
   it('normalizes wheel input without section-index snapping', async () => {
     const html = await readFile(path.join(root, 'index.html'), 'utf8')
     expect(html).toContain('deltaMode===1')
