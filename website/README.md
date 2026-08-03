@@ -25,13 +25,18 @@ From the repository root, use `npm run website:dev`. The public site uses port
 
 ## Add the final demo video
 
-For the submission video, export an MP4 and place it at
-`public/media/project-lens-demo.mp4` (optionally add
-`public/media/project-lens-demo-poster.webp`), then run the website build. No
-source edit is needed. Alternatively set `VITE_DEMO_VIDEO_URL` to a public
-video URL before building. The placeholder becomes an accessible video player
-with controls only when one of these sources exists; missing media does not
-trigger a request or a 404.
+Add the final demo video here:
+
+`website/public/media/project-lens-demo.mp4`
+
+Optional poster:
+
+`website/public/media/project-lens-demo-poster.webp`
+
+No source-code changes are required. Run the website build after adding the
+file. The placeholder becomes an accessible video player with native controls
+only when the local file exists; missing media does not trigger a request or a
+404. A public `VITE_DEMO_VIDEO_URL` may also be supplied at build time.
 
 ## Static deployment
 

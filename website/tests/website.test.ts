@@ -32,6 +32,13 @@ describe('public website replacement', () => {
     expect(config).toContain('project-lens-demo.mp4')
   })
 
+  it('documents zero-code local demo-video replacement', async () => {
+    const readme = await readFile(path.join(root, 'README.md'), 'utf8')
+    expect(readme).toContain('website/public/media/project-lens-demo.mp4')
+    expect(readme).toContain('website/public/media/project-lens-demo-poster.webp')
+    expect(readme).toContain('No source-code changes are required.')
+  })
+
   it('keeps both GitHub actions clickable above the terrain', async () => {
     const html = await readFile(path.join(root, 'index.html'), 'utf8')
     expect((html.match(/href="https:\/\/github\.com\/catDkiller\/project-lens"/g) ?? []).length).toBe(1)
