@@ -27,7 +27,7 @@ $pathCodex = CommandPath 'codex'; if ($pathCodex) { $codexCandidates += $pathCod
 $codex = $null; $codexVersion = $null
 foreach ($candidate in ($codexCandidates | Select-Object -Unique)) { try { $candidateVersion = (& $candidate --version 2>&1 | Out-String).Trim(); if ($LASTEXITCODE -eq 0 -and $candidateVersion) { $codex = $candidate; $codexVersion = $candidateVersion; break } } catch { } }
 if (-not $codex) { Fail 'OpenAI Codex CLI was not found. Install Codex, authenticate it, and run this setup again.' }
-$login = & $codex login status 2>&1; if ($LASTEXITCODE -ne 0) { Fail 'Codex authentication could not be confirmed. Run: codex login, then run setup-project-lens.bat again.' }
+$login = Start-Process -FilePath $codex -ArgumentList 'login','status' -Wait -PassThru -WindowStyle Hidden; if ($login.ExitCode -ne 0) { Fail 'Codex authentication could not be confirmed. Run: codex login, then run setup-project-lens.bat again.' }
 
 Write-Host "Node.js $nodeVersion, npm available, Git available, Codex available ($codexVersion)." -ForegroundColor Green
 Write-Host 'Installing root dependencies...' -ForegroundColor Cyan
