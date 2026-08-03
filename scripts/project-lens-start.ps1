@@ -21,10 +21,19 @@ function PortOwner($Port) {
 
 if (-not (Test-Path (Join-Path $Root 'node_modules'))) { Fail 'Dependencies are not installed. Run setup-project-lens.bat first.' }
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
-$existing = if (Test-Path $StatePath) { try { Get-Content $StatePath -Raw | ConvertFrom-Json } catch { $null } } else { $null }
-if ($existing) {
-  try { $health = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/runtime/health' -UseBasicParsing -TimeoutSec 2; if ($health.StatusCode -eq 200) { Start-Process 'http://127.0.0.1:5173'; Write-Host 'Project Lens is already running; opened the existing instance.' -ForegroundColor Green; exit 0 } } catch { }
-}
+try {
+  $health = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/runtime/health' -UseBasicParsing -TimeoutSec 2
+  if ($health.StatusCode -eq 200) {
+    try {
+      $frontend = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2
+      if ($frontend.StatusCode -ge 200 -and $frontend.StatusCode -lt 500) {
+        Start-Process 'http://127.0.0.1:5173'
+        Write-Host 'Project Lens is already running; opened the existing instance.' -ForegroundColor Green
+        exit 0
+      }
+    } catch { }
+  }
+} catch { }
 $daemonOwner = PortOwner 8787; if ($daemonOwner) { Fail "daemon port 8787 is occupied by process $daemonOwner. Stop that application safely, then retry." }
 $webOwner = PortOwner 5173; if ($webOwner) { Fail "frontend port 5173 is occupied by process $webOwner. Stop that application safely, then retry." }
 Remove-Item $DaemonLog,$WebLog -Force -ErrorAction SilentlyContinue
