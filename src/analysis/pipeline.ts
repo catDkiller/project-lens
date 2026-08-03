@@ -45,6 +45,7 @@ export async function runProjectAnalysis(
     inventory = await createProjectInventoryAsync(project, (detail) => options.onProgress?.('inventory', detail), options.signal)
   })
   await runStage('imports', reportStage, readableDelayMs, async () => {
+    options.onProgress?.('imports', { current: 0, total: inventory!.files.length })
     for (let start = 0; start < inventory!.files.length; start += 200) {
       if (options.signal?.aborted) throw new Error('Analysis was cancelled.')
       importCount += inventory!.files.slice(start, start + 200).reduce((count, file) => count + extractStaticImportSpecifiers(file.content).length, 0)
@@ -54,6 +55,7 @@ export async function runProjectAnalysis(
     }
   })
   await runStage('relationships', reportStage, readableDelayMs, async () => {
+    options.onProgress?.('relationships', { current: 0, total: inventory!.files.length })
     relationships = await buildImportGraphAsync(inventory!, (detail) => options.onProgress?.('relationships', detail), options.signal)
   })
   await runStage('features', reportStage, readableDelayMs, () => {

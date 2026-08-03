@@ -33,4 +33,21 @@ describe('runProjectAnalysis', () => {
     expect(progress.every((item) => item.current <= item.total && item.current >= 0)).toBe(true)
     expect(progress.some((item) => item.stage === 'imports')).toBe(true)
   })
+
+  it('finalizes empty and sub-chunk projects without waiting for a full batch', async () => {
+    for (const count of [0, 1, 199, 200, 201]) {
+      const progress: Array<{ stage: string; current: number; total: number }> = []
+      const project = { ...preparedViteSample, files: Array.from({ length: count }, (_, index) => ({ path: `src/file-${index}.ts`, content: 'export const value = 1' })) }
+      const result = await runProjectAnalysis(project, [], () => undefined, 0, { onProgress: (stage, detail) => progress.push({ stage, current: detail.current, total: detail.total }) })
+      expect(result.inventory.files).toHaveLength(count)
+      expect(progress.some((item) => item.stage === 'imports' && item.current === 0)).toBe(true)
+      expect(progress.some((item) => item.stage === 'relationships' && item.current === 0)).toBe(true)
+    }
+  })
+
+  it('does not activate cancellation unless the caller aborts', async () => {
+    const controller = new AbortController()
+    await expect(runProjectAnalysis(preparedViteSample, [], () => undefined, 0, { signal: controller.signal })).resolves.toBeDefined()
+    expect(controller.signal.aborted).toBe(false)
+  })
 })

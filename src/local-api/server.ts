@@ -125,7 +125,22 @@ async function execute(run: Run) {
   } finally { metadata.state = run.state; metadata.terminalResult = run.terminalOutcome; await writeRunMetadata(staged.directory, metadata) }
 }
 
-function fail(run: Run, error: unknown) { if (run.terminalOutcome) return; const cancelled = error instanceof Error && /cancelled/i.test(error.message); const detail = error as { code?: AnalysisEventDto['diagnostic'] extends { code?: infer Code } ? Code : never; exitCode?: number }; run.terminalOutcome = cancelled ? 'cancelled' : 'failed'; setState(run, cancelled ? 'cancelled' : 'failed'); const stage = run.events.findLast((item) => item.stage)?.stage; event(run, { type: cancelled ? 'cancelled' : 'failed', stage, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? 'Analysis was cancelled.' : error instanceof Error ? error.message : 'Analysis failed.', diagnostic: { code: detail?.code ?? 'unknown', exitCode: detail?.exitCode, stderr: error instanceof Error ? redact(error.message) : undefined, codexVersion: run.codexVersion, lastActivity: run.lastGenuineAgentEventAt } }); if (run.runDirectory) void writeRunMetadata(run.runDirectory, { runId: run.runId, state: run.state, terminalResult: run.terminalOutcome, error: error instanceof Error ? redact(error.message) : 'Analysis failed.' }) }
+async function fail(run: Run, error: unknown) {
+  if (run.terminalOutcome) return
+  const cancelled = error instanceof Error && /cancelled/i.test(error.message)
+  const detail = error as { code?: AnalysisEventDto['diagnostic'] extends { code?: infer Code } ? Code : never; exitCode?: number }
+  run.terminalOutcome = cancelled ? 'cancelled' : 'failed'
+  setState(run, cancelled ? 'cancelled' : 'failed')
+  const stage = run.events.findLast((item) => item.stage)?.stage
+  event(run, {
+    type: cancelled ? 'cancelled' : 'failed',
+    stage,
+    status: cancelled ? 'cancelled' : 'failed',
+    error: cancelled ? 'Analysis was cancelled.' : error instanceof Error ? error.message : 'Analysis failed.',
+    diagnostic: { code: detail?.code ?? 'unknown', exitCode: detail?.exitCode, stderr: error instanceof Error ? redact(error.message) : undefined, codexVersion: run.codexVersion, lastActivity: run.lastGenuineAgentEventAt },
+  })
+  if (run.runDirectory) await writeRunMetadata(run.runDirectory, { runId: run.runId, state: run.state, terminalResult: run.terminalOutcome, error: error instanceof Error ? redact(error.message) : 'Analysis failed.' })
+}
 async function body(req: import('node:http').IncomingMessage, limit: number) { let value = ''; for await (const chunk of req) { value += chunk; if (value.length > limit) throw new Error('Request is too large.') } return value }
 
 export const daemon = createServer(async (req, res) => {
@@ -147,7 +162,7 @@ export const daemon = createServer(async (req, res) => {
       const project = local ? localProject(parsed.name ?? 'Local project', prepareLocalFiles((parsed.files ?? []).map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength }))).files, parsed.projectType ?? 'Software project') : undefined
       if (local && !project?.files.length) return send(res, 400, { error: 'No supported project text files were included.' })
       const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: typeof parsed.model === 'string' ? parsed.model : undefined, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined, sourcePath: local && typeof parsed.sourcePath === 'string' ? parsed.sourcePath : undefined }
-      run.workerScheduledAt = new Date().toISOString(); runs.set(run.runId, run); event(run, { type: 'queued', stage: 'preparing', status: 'pending', message: 'Run created.' }); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Selected project accepted.' }); void (async () => { run.workerStartedAt = new Date().toISOString(); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Local analysis worker started.' }); await execute(run) })().catch((error) => fail(run, error)); return send(res, 202, { runId: run.runId })
+      run.workerScheduledAt = new Date().toISOString(); runs.set(run.runId, run); event(run, { type: 'queued', stage: 'preparing', status: 'pending', message: 'Run created.' }); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Selected project accepted.' }); void (async () => { run.workerStartedAt = new Date().toISOString(); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Local analysis worker started.' }); await execute(run) })().catch(async (error) => { await fail(run, error) }); return send(res, 202, { runId: run.runId })
     } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Invalid analysis request.' }) }
   }
   const recoverMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/recheck$/)

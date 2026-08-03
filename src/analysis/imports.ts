@@ -31,6 +31,7 @@ export async function buildImportGraphAsync(
   const knownPaths = new Set(inventory.files.map((file) => file.path))
   const candidates = inventory.files.filter((file) => file.type === 'javascript' || file.type === 'typescript')
   const relationships: ImportRelationship[] = []
+  onProgress?.({ current: 0, total: candidates.length })
   for (let start = 0; start < candidates.length; start += 200) {
     if (signal?.aborted) throw new Error('Analysis was cancelled.')
     for (const file of candidates.slice(start, start + 200)) {
