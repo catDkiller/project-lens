@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Project Lens helps developers understand AI-generated software projects.",
+  "engines": { "node": ">=20.19.0" },
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,blue \"npm run daemon\" \"npm run dev:web\"",
@@ -15,6 +16,7 @@
     "daemon": "tsx src/local-api/server.ts",
     "project-lens": "tsx src/local-api/cli.ts",
     "artifact:audit": "tsx src/local-api/artifactAudit.ts",
+    "doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/doctor-project-lens.ps1",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run --exclude \"**/.project-lens/**\"",
