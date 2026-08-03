@@ -17,6 +17,27 @@ export function createProjectInventory(project: NormalizedProject): ProjectInven
   return { files }
 }
 
+export async function createProjectInventoryAsync(
+  project: NormalizedProject,
+  onProgress?: (progress: { current: number; total: number; area?: string }) => void,
+  signal?: AbortSignal,
+): Promise<ProjectInventory> {
+  const files: ReturnType<typeof createProjectInventory>['files'] = []
+  const chunkSize = 200
+  for (let start = 0; start < project.files.length; start += chunkSize) {
+    if (signal?.aborted) throw new Error('Analysis was cancelled.')
+    for (const file of project.files.slice(start, start + chunkSize)) {
+      const normalized = { ...file, path: normalizeProjectPath(file.path) }
+      if (isRelevantFile(normalized)) files.push({ ...normalized, type: classifyFileType(normalized.path) })
+    }
+    const current = Math.min(start + chunkSize, project.files.length)
+    onProgress?.({ current, total: project.files.length, area: project.files[Math.max(0, current - 1)]?.path.split('/').slice(0, -1).join('/') || undefined })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  files.sort((left, right) => left.path.localeCompare(right.path))
+  return { files }
+}
+
 export function normalizeProjectPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\.\//, '')
 }

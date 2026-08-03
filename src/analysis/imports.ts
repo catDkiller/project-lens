@@ -23,6 +23,30 @@ export function buildImportGraph(inventory: ProjectInventory): ImportRelationshi
     }))
 }
 
+export async function buildImportGraphAsync(
+  inventory: ProjectInventory,
+  onProgress?: (progress: { current: number; total: number }) => void,
+  signal?: AbortSignal,
+): Promise<ImportRelationship[]> {
+  const knownPaths = new Set(inventory.files.map((file) => file.path))
+  const candidates = inventory.files.filter((file) => file.type === 'javascript' || file.type === 'typescript')
+  const relationships: ImportRelationship[] = []
+  for (let start = 0; start < candidates.length; start += 200) {
+    if (signal?.aborted) throw new Error('Analysis was cancelled.')
+    for (const file of candidates.slice(start, start + 200)) {
+      relationships.push(...extractStaticImportSpecifiers(file.content).map((specifier) => {
+        const kind = specifier.startsWith('.') ? 'relative' : 'package'
+        const resolvedPath = kind === 'relative' ? resolveRelativeImport(file.path, specifier, knownPaths) : undefined
+        return { fromPath: file.path, specifier, kind: kind as 'relative' | 'package', resolution: (kind === 'package' ? 'external' : resolvedPath ? 'resolved' : 'unresolved') as 'resolved' | 'unresolved' | 'external', ...(resolvedPath && { resolvedPath }) }
+      }))
+    }
+    const current = Math.min(start + 200, candidates.length)
+    onProgress?.({ current, total: candidates.length })
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  return relationships
+}
+
 export function extractStaticImportSpecifiers(content: string): string[] {
   return [...content.matchAll(importPattern), ...content.matchAll(exportPattern)]
     .sort((left, right) => left.index - right.index)

@@ -24,4 +24,13 @@ describe('runProjectAnalysis', () => {
 
     expect(updates).toContain('features:failed')
   })
+
+  it('yields during inventory and reports bounded progress', async () => {
+    const project = { ...preparedViteSample, files: Array.from({ length: 450 }, (_, index) => ({ path: `src/file-${index}.ts`, content: 'export const value = 1' })) }
+    const progress: Array<{ stage: string; current: number; total: number }> = []
+    await runProjectAnalysis(project, [], () => undefined, 0, { onProgress: (stage, detail) => progress.push({ stage, current: detail.current, total: detail.total }) })
+    expect(progress.some((item) => item.stage === 'inventory' && item.current < item.total)).toBe(true)
+    expect(progress.every((item) => item.current <= item.total && item.current >= 0)).toBe(true)
+    expect(progress.some((item) => item.stage === 'imports')).toBe(true)
+  })
 })

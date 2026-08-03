@@ -18,9 +18,24 @@ describe('honest analysis progress', () => {
   })
 
   it('keeps Recent activity populated immediately after run creation', () => {
-    const queued: AnalysisEventDto = { id: 'event-queued', runId: 'run-1', sequence: 1, type: 'queued', stage: 'preparing', status: 'active', message: 'Run created. Preparing local analysis.' }
-    const markup = renderToStaticMarkup(<AnalysisProgress projectName="Project" events={[queued]} startedAt={Date.now()} status={{ ...status, state: 'preparing-project', childPid: undefined, lastGenuineAgentEventAt: undefined }} onRetry={vi.fn()} onReturn={vi.fn()} onCancel={vi.fn()} />)
-    expect(markup).toContain('Run created. Preparing local analysis.')
-    expect(markup).toContain('Recent activity (1)')
+    const events: AnalysisEventDto[] = [
+      { id: 'event-queued', runId: 'run-1', sequence: 1, type: 'queued', stage: 'preparing', status: 'pending', message: 'Run created.' },
+      { id: 'event-selected', runId: 'run-1', sequence: 2, type: 'status', stage: 'preparing', status: 'active', message: 'Selected project accepted.' },
+      { id: 'event-preparing', runId: 'run-1', sequence: 3, type: 'preparing-evidence', stage: 'preparing', status: 'active', message: 'Preparing local analysis.' },
+    ]
+    const markup = renderToStaticMarkup(<AnalysisProgress projectName="Project" events={events} startedAt={Date.now()} status={{ ...status, state: 'preparing-project', childPid: undefined, lastGenuineAgentEventAt: undefined, lastAnyEventAt: undefined }} onRetry={vi.fn()} onReturn={vi.fn()} onCancel={vi.fn()} />)
+    expect(markup).toContain('Recent activity (3)')
+    expect(markup).toContain('Run created.')
+    expect(markup).toContain('Selected project accepted.')
+    expect(markup).toContain('No daemon progress event received yet')
+    expect(markup).not.toContain('— ago')
+  })
+
+  it('shows a preparing watchdog and clear action labels', () => {
+    const markup = renderToStaticMarkup(<AnalysisProgress projectName="Project" events={[]} startedAt={Date.now() - 11_000} status={{ ...status, state: 'preparing-project', childPid: undefined, lastAnyEventAt: 'not-a-time' }} onRetry={vi.fn()} onReturn={vi.fn()} onCancel={vi.fn()} />)
+    expect(markup).toContain('Project Lens has not started scanning this project.')
+    expect(markup).toContain('Choose another project')
+    expect(markup).toContain('Cancel analysis')
+    expect(markup).not.toContain('NaNs')
   })
 })

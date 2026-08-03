@@ -52,6 +52,10 @@ export interface AnalysisRunStatusDto {
   state: AnalysisRunState
   createdAt: string
   startedAt?: string
+  workerScheduledAt?: string
+  workerStartedAt?: string
+  firstStageEventAt?: string
+  discoveryStartedAt?: string
   childPid?: number
   lastAnyEventAt?: string
   lastGenuineAgentEventAt?: string

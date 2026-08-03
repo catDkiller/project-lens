@@ -50,6 +50,18 @@
 .analysis-history { max-height: 16rem; overflow: auto; padding-top: .6rem; }
 .analysis-history p { color: var(--fg-secondary); font-size: .82rem; margin: .45rem 0; }
 .analysis-history time { color: var(--muted); display: inline-block; margin-right: .6rem; min-width: 4.5rem; }
+.analysis-actions { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.25rem; }
+.analysis-actions button,.analysis-dialog button { min-height:44px; padding:.7rem 1rem; border-radius:10px; font:inherit; cursor:pointer; transition:background .15s ease,border-color .15s ease,transform .1s ease; }
+.analysis-actions button:active,.analysis-dialog button:active { transform:translateY(1px); }
+.analysis-actions button:focus-visible,.analysis-dialog button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.secondary-button { border:1px solid var(--border-strong); background:var(--surface); color:var(--fg); }
+.secondary-button:hover { background:var(--surface-soft); border-color:var(--accent); }
+.danger-button { border:1px solid #9b5b63; background:color-mix(in srgb,#6e2730 32%,var(--surface)); color:#ffdce0; }
+.danger-button:hover { background:color-mix(in srgb,#8b303b 48%,var(--surface)); }
+.danger-button:disabled { cursor:wait; opacity:.65; }
+.analysis-dialog-backdrop { position:fixed; inset:0; display:grid; place-items:center; padding:1rem; background:rgb(0 0 0 / .58); z-index:20; }
+.analysis-dialog { width:min(100%,27rem); padding:1.25rem; border:1px solid var(--border-strong); border-radius:14px; background:var(--surface); box-shadow:0 20px 60px rgb(0 0 0 / .35); display:grid; gap:.75rem; }
+@media (max-width:600px) { .analysis-actions { flex-direction:column; } .analysis-actions button { width:100%; } }
 
 .launcher-screen {
   display: grid;
