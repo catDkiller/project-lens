@@ -10,6 +10,6 @@ foreach ($rootPid in $roots) {
   $queue = New-Object System.Collections.Queue; $queue.Enqueue([int]$rootPid)
   while ($queue.Count) { $pid = $queue.Dequeue(); if (-not $all.Add($pid)) { continue }; Get-CimInstance Win32_Process -Filter "ParentProcessId=$pid" | ForEach-Object { $queue.Enqueue([int]$_.ProcessId) } }
 }
-foreach ($pid in ($all | Sort-Object -Descending)) { Stop-Process -Id $pid -Force; Write-Host "Stopped Project Lens process $pid." }
+foreach ($pid in ($all | Sort-Object -Descending)) { & taskkill.exe /PID $pid /T /F *> $null; Write-Host "Stopped Project Lens process $pid." }
 Remove-Item $StatePath -Force
 Write-Host 'Project Lens stopped.' -ForegroundColor Green
