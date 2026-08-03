@@ -32,6 +32,8 @@ describe('fresh-install launchers', () => {
     expect(stop).toContain('ParentProcessId')
     expect(stop).not.toContain('Get-Process node | Stop-Process')
     expect(start).toContain('Project Lens is already running')
+    expect(start).toContain('repositoryIdentity')
+    expect(start).toContain('incompatible Project Lens process')
     expect(start).toContain('port 8787 is occupied')
     expect(start).toContain('port 5173 is occupied')
   })

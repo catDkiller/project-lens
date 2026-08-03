@@ -18,12 +18,21 @@ function PortOwner($Port) {
   if ($line -and $line.Line -match '(\d+)$') { return [int]$Matches[1] }
   return $null
 }
+function RepositoryIdentity($Path) {
+  $bytes = [Text.Encoding]::UTF8.GetBytes($Path.ToLowerInvariant())
+  $hash = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+  return (($hash | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 16)
+}
+try { $expectedCommit = (& git -C $Root rev-parse --short HEAD).Trim() } catch { Fail 'Git could not identify this Project Lens build.' }
+$expectedRepositoryIdentity = RepositoryIdentity $Root
 
 if (-not (Test-Path (Join-Path $Root 'node_modules'))) { Fail 'Dependencies are not installed. Run setup-project-lens.bat first.' }
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 try {
   $health = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/api/runtime/health' -UseBasicParsing -TimeoutSec 2
   if ($health.StatusCode -eq 200) {
+    $meta = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/meta' -TimeoutSec 2
+    if ($meta.app -ne 'project-lens' -or $meta.gitCommit -ne $expectedCommit -or $meta.repositoryIdentity -ne $expectedRepositoryIdentity) { Fail "daemon port 8787 is occupied by an incompatible Project Lens process (build $($meta.gitCommit), repository identity $($meta.repositoryIdentity)). Stop that clone explicitly, then retry." }
     try {
       $frontend = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2
       if ($frontend.StatusCode -ge 200 -and $frontend.StatusCode -lt 500) {
@@ -39,6 +48,8 @@ $webOwner = PortOwner 5173; if ($webOwner) { Fail "frontend port 5173 is occupie
 Remove-Item $DaemonLog,$WebLog -Force -ErrorAction SilentlyContinue
 $daemon = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',"npm run daemon > `"$DaemonLog`" 2>&1" -WorkingDirectory $Root -PassThru -WindowStyle Hidden
 $health = Wait-Http 'http://127.0.0.1:8787/api/runtime/health' 'daemon'
+$meta = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/meta' -TimeoutSec 2
+if ($meta.app -ne 'project-lens' -or $meta.gitCommit -ne $expectedCommit -or $meta.repositoryIdentity -ne $expectedRepositoryIdentity) { Fail 'The daemon started, but its identity does not match this repository. Check the daemon log and stop the incompatible process.' }
 $web = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',"npm run dev:web -- --host 127.0.0.1 > `"$WebLog`" 2>&1" -WorkingDirectory $Root -PassThru -WindowStyle Hidden
 Wait-Http 'http://127.0.0.1:5173/' 'frontend'
 $daemonProcessPid = (Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)

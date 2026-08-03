@@ -11,6 +11,7 @@ export interface RuntimeMetaDto {
   app: 'project-lens'
   buildId: string
   gitCommit: string
+  repositoryIdentity: string
   daemonStartedAt: string
   processId: number
   apiVersion: number
@@ -23,7 +24,7 @@ export type AnalysisEventType = 'queued' | 'preparing-evidence' | 'workspace-rea
 export type RunStageId = 'preparing' | 'discovery' | 'filtering' | 'snapshot' | 'codex-preparation' | 'codex-analysis' | 'validation' | 'opening-report'
 export type RunStageStatus = 'pending' | 'active' | 'complete' | 'warning' | 'failed' | 'cancelled'
 export type AnalysisRunState = 'queued' | 'preparing-project' | 'workspace-ready' | 'enriching-with-codex' | 'enrichment-complete' | 'enrichment-unavailable' | 'running' | 'artifact-ready' | 'completed' | 'cancelling' | 'cancelled' | 'failed'
-export type AnalysisFailureCode = 'codex-unavailable' | 'codex-sign-in-required' | 'codex-invocation-failed' | 'process-startup-failure' | 'output-invalid' | 'analysis-aborted' | 'unknown'
+export type AnalysisFailureCode = 'codex-unavailable' | 'codex-sign-in-required' | 'codex-invocation-failed' | 'process-startup-failure' | 'worker-start-timeout' | 'output-invalid' | 'analysis-aborted' | 'unknown'
 
 export interface AnalysisEventDto {
   id?: string

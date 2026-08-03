@@ -15,14 +15,16 @@ import { assessLocalProject } from '../project-sources/support'
 import { ARTIFACT_VALIDATOR_VERSION, PERSISTED_RUN_SCHEMA_VERSION, PROJECT_LENS_API_VERSION } from '../runtimeVersion'
 
 type Project = { id: string; name: string; framework: string; files: { path: string; content: string }[] }
-type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; workerScheduledAt?: string; workerStartedAt?: string; firstStageEventAt?: string; discoveryStartedAt?: string; childPid?: number; child?: ChildProcess; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local'; sourcePath?: string; runDirectory?: string; report?: PresentationKnowledgeBase }
+type Run = { runId: string; projectId: string; agentId: 'codex'; model?: string; codexVersion?: string; state: AnalysisRunState; createdAt: string; startedAt?: string; workerScheduledAt?: string; workerStartedAt?: string; firstStageEventAt?: string; discoveryStartedAt?: string; childPid?: number; child?: ChildProcess; workerWatchdog?: ReturnType<typeof setTimeout>; lastAnyEventAt?: string; lastGenuineAgentEventAt?: string; cancellationRequested: boolean; terminalOutcome?: 'completed' | 'cancelled' | 'failed'; events: AnalysisEventDto[]; controller: AbortController; project?: Project; source?: 'local'; sourcePath?: string; runDirectory?: string; report?: PresentationKnowledgeBase }
 const runs = new Map<string, Run>()
+export const WORKER_START_TIMEOUT_MS = 15_000
 const sampleRoot = path.resolve(process.cwd(), 'prepared-sample-project')
 export const daemonToken = process.env.PROJECT_LENS_API_TOKEN ?? randomUUID()
 const allowedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173', 'http://[::1]:5173'])
 const daemonStartedAt = new Date().toISOString()
 const gitCommit = process.env.PROJECT_LENS_GIT_COMMIT ?? (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' }).trim() } catch { return 'unknown' } })()
 const daemonBuildId = process.env.PROJECT_LENS_BUILD_ID ?? `api-${gitCommit}-${PROJECT_LENS_API_VERSION}-${REPORT_SCHEMA_VERSION}`
+const repositoryIdentity = createHash('sha256').update(path.resolve(process.cwd()).toLowerCase()).digest('hex').slice(0, 16)
 
 export function isAllowedDaemonRequest(origin: string | undefined, token: string | undefined) { return (!origin || allowedOrigins.has(origin)) && token === daemonToken }
 function send(res: import('node:http').ServerResponse, status: number, body: unknown) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
@@ -127,8 +129,9 @@ async function execute(run: Run) {
 
 async function fail(run: Run, error: unknown) {
   if (run.terminalOutcome) return
+  if (run.workerWatchdog) clearTimeout(run.workerWatchdog)
   const cancelled = error instanceof Error && /cancelled/i.test(error.message)
-  const detail = error as { code?: AnalysisEventDto['diagnostic'] extends { code?: infer Code } ? Code : never; exitCode?: number }
+  const detail = error as { code?: AnalysisEventDto['diagnostic'] extends { code?: infer Code } ? Code : never; exitCode?: number; stderr?: string }
   run.terminalOutcome = cancelled ? 'cancelled' : 'failed'
   setState(run, cancelled ? 'cancelled' : 'failed')
   const stage = run.events.findLast((item) => item.stage)?.stage
@@ -137,7 +140,7 @@ async function fail(run: Run, error: unknown) {
     stage,
     status: cancelled ? 'cancelled' : 'failed',
     error: cancelled ? 'Analysis was cancelled.' : error instanceof Error ? error.message : 'Analysis failed.',
-    diagnostic: { code: detail?.code ?? 'unknown', exitCode: detail?.exitCode, stderr: error instanceof Error ? redact(error.message) : undefined, codexVersion: run.codexVersion, lastActivity: run.lastGenuineAgentEventAt },
+    diagnostic: { code: detail?.code ?? 'unknown', exitCode: detail?.exitCode, stderr: detail?.stderr ? redact(detail.stderr) : error instanceof Error ? redact(error.message) : undefined, codexVersion: run.codexVersion, lastActivity: run.lastGenuineAgentEventAt },
   })
   if (run.runDirectory) await writeRunMetadata(run.runDirectory, { runId: run.runId, state: run.state, terminalResult: run.terminalOutcome, error: error instanceof Error ? redact(error.message) : 'Analysis failed.' })
 }
@@ -146,7 +149,7 @@ async function body(req: import('node:http').IncomingMessage, limit: number) { l
 export const daemon = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   if (req.method === 'GET' && url.pathname === '/api/runtime/health') return send(res, 200, { status: 'ready', version: '0.1.0', token: daemonToken })
-  if (req.method === 'GET' && url.pathname === '/api/meta') return send(res, 200, { app: 'project-lens', buildId: daemonBuildId, gitCommit, daemonStartedAt, processId: process.pid, apiVersion: PROJECT_LENS_API_VERSION, persistedRunSchemaVersion: PERSISTED_RUN_SCHEMA_VERSION, reportSchemaVersion: REPORT_SCHEMA_VERSION, artifactValidatorVersion: ARTIFACT_VALIDATOR_VERSION })
+  if (req.method === 'GET' && url.pathname === '/api/meta') return send(res, 200, { app: 'project-lens', buildId: daemonBuildId, gitCommit, repositoryIdentity, daemonStartedAt, processId: process.pid, apiVersion: PROJECT_LENS_API_VERSION, persistedRunSchemaVersion: PERSISTED_RUN_SCHEMA_VERSION, reportSchemaVersion: REPORT_SCHEMA_VERSION, artifactValidatorVersion: ARTIFACT_VALIDATOR_VERSION })
   const origin = req.headers.origin
   if (origin && !allowedOrigins.has(origin)) return send(res, 403, { error: 'origin-not-allowed' })
   if (!isAllowedDaemonRequest(origin, req.headers['x-project-lens-token'] as string | undefined) && url.searchParams.get('token') !== daemonToken) return send(res, 401, { error: 'invalid-daemon-token' })
@@ -162,7 +165,7 @@ export const daemon = createServer(async (req, res) => {
       const project = local ? localProject(parsed.name ?? 'Local project', prepareLocalFiles((parsed.files ?? []).map((file) => ({ ...file, size: new TextEncoder().encode(file.content).byteLength }))).files, parsed.projectType ?? 'Software project') : undefined
       if (local && !project?.files.length) return send(res, 400, { error: 'No supported project text files were included.' })
       const run: Run = { runId: randomUUID(), projectId: project?.id ?? 'prepared-vite-sample', agentId: 'codex', model: typeof parsed.model === 'string' ? parsed.model : undefined, state: 'queued', createdAt: new Date().toISOString(), cancellationRequested: false, events: [], controller: new AbortController(), project, source: local ? 'local' : undefined, sourcePath: local && typeof parsed.sourcePath === 'string' ? parsed.sourcePath : undefined }
-      run.workerScheduledAt = new Date().toISOString(); runs.set(run.runId, run); event(run, { type: 'queued', stage: 'preparing', status: 'pending', message: 'Run created.' }); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Selected project accepted.' }); void (async () => { run.workerStartedAt = new Date().toISOString(); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Local analysis worker started.' }); await execute(run) })().catch(async (error) => { await fail(run, error) }); return send(res, 202, { runId: run.runId })
+      run.workerScheduledAt = new Date().toISOString(); runs.set(run.runId, run); event(run, { type: 'queued', stage: 'preparing', status: 'pending', message: 'Run created.' }); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Selected project accepted.' }); run.workerWatchdog = setTimeout(() => { if (!run.workerStartedAt && !run.terminalOutcome) void fail(run, Object.assign(new Error('The local analysis worker did not start within 15 seconds.'), { code: 'worker-start-timeout' })) }, WORKER_START_TIMEOUT_MS); void (async () => { run.workerStartedAt = new Date().toISOString(); if (run.workerWatchdog) clearTimeout(run.workerWatchdog); event(run, { type: 'status', stage: 'preparing', status: 'active', message: 'Local analysis worker started.' }); await execute(run) })().catch(async (error) => { await fail(run, error) }); return send(res, 202, { runId: run.runId })
     } catch (error) { return send(res, 400, { error: error instanceof Error ? error.message : 'Invalid analysis request.' }) }
   }
   const recoverMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/recheck$/)

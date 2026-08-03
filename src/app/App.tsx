@@ -10,6 +10,7 @@ import { KnowledgeWorkspace } from './KnowledgeWorkspace'
 import type { Accent, Appearance } from './ThemeMenu'
 import './app.css'
 import { ARTIFACT_VALIDATOR_VERSION, PROJECT_LENS_API_VERSION } from '../runtimeVersion'
+import { mergeRunEvents } from './runRecovery'
 
 type Local = { name: string; canonicalPath?: string; files: ProjectFile[]; summary: string; projectType: string; skipped: Record<LocalSkipReason, number>; support: 'supported' | 'too-large' | 'failed'; diagnostics?: string[] }
 export function App() {
@@ -23,7 +24,19 @@ export function App() {
   useEffect(() => { if (!started.current) { started.current = true; void refresh() } }, [refresh])
   useEffect(() => { if (!import.meta.env.DEV || new URLSearchParams(window.location.search).get('fixture') !== 'deep-guide') return; void import('../fixtures/deepGuideDemoPresentationKnowledge').then(({ deepGuideDemoPresentationKnowledge: demo }) => { setKnowledge(demo); setMode('workspace') }) }, [])
   useEffect(() => { const recovered = new URLSearchParams(window.location.search).get('run'); if (!recovered || !token) return; void api(`/api/runs/${recovered}/recheck`, { method: 'POST' }).then(async (response) => { if (response.ok) { const payload = await response.json() as { report?: PresentationKnowledgeBase }; if (payload.report) { setKnowledge(payload.report); setMode('workspace') } } }) }, [api, token])
-  useEffect(() => { if (!runId) return; const controller = new AbortController(); const timer = window.setInterval(() => { void api(`/api/analysis/${runId}`, { signal: controller.signal }).then(async (response) => { if (response.ok) setStatus(await response.json() as AnalysisRunStatusDto) }) }, 3000); return () => { controller.abort(); clearInterval(timer) } }, [api, runId])
+  useEffect(() => {
+    if (!runId) return
+    const controller = new AbortController()
+    const poll = async () => {
+      try {
+        const response = await api(`/api/analysis/${runId}`, { signal: controller.signal }); if (!response.ok) return
+        const next = await response.json() as AnalysisRunStatusDto; setStatus(next); setEvents((current) => mergeRunEvents(current, next.events))
+        if (next.state === 'failed' || next.state === 'cancelled') { const terminal = next.events.findLast((item) => item.type === 'failed' || item.type === 'cancelled'); setError(terminal?.error ?? (next.state === 'cancelled' ? 'Analysis was cancelled.' : 'Analysis failed before the report was ready.')); setMode('failed'); setRunId(undefined) }
+        if (next.state === 'completed' || next.state === 'artifact-ready') { const reportResponse = await api(`/api/analysis/${runId}/report`, { signal: controller.signal }); if (reportResponse.ok) { setKnowledge(await reportResponse.json() as PresentationKnowledgeBase); setMode('workspace'); setRunId(undefined) } }
+      } catch { /* SSE remains the primary stream; polling is the recovery path. */ }
+    }
+    void poll(); const timer = window.setInterval(() => { void poll() }, 3000); return () => { controller.abort(); clearInterval(timer) }
+  }, [api, runId])
   const source = local ? { kind: 'local' as const, name: local.name, summary: local.summary, projectType: local.projectType, support: local.support, diagnostics: local.diagnostics } : prepared ? { kind: 'prepared' as const, projectType: 'React/Vite sample' } : undefined
   const rawState = deriveLauncherState(codex, source, model, reading)
   const state = runtimeCompatible ? rawState : { ...rawState, canAnalyse: false, disabledReason: 'Project Lens needs to restart its local service. The browser and local daemon are running different versions.' }
