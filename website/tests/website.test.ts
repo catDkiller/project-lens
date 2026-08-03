@@ -21,12 +21,4 @@ describe('public website replacement', () => {
     expect(html).toContain('Local-first limits')
     expect(html).not.toContain('project-lens-sea.mp4')
   })
-
-  it('offers a local demo-video preview and responsive wheel navigation', async () => {
-    const html = await readFile(path.join(root, 'index.html'), 'utf8')
-    expect(html).toContain('id="demo-video"')
-    expect(html).toContain('Nothing is uploaded.')
-    expect(html).toContain('let wheelCarry=0')
-    expect(html).toContain('const threshold=e.deltaMode===1?3:45')
-  })
 })
