@@ -35,17 +35,18 @@ export async function resolveCodexCli(): Promise<CodexCliProbe | { error: string
   return { error: 'Codex CLI is unavailable.' }
 }
 export function buildCodexArgs(runDirectory: string, model?: string) { return ['exec', '--json', '--skip-git-repo-check', '--sandbox', process.platform === 'win32' ? 'danger-full-access' : 'workspace-write', '-C', runDirectory, ...(model ? ['--model', model] : [])] }
-export async function stageRun(root: string, runId: string, files: { path: string; content: string }[], skill: string) {
+export async function stageRun(root: string, runId: string, files: { path: string; content: string }[], skill: string, onFile?: (file: { path: string; index: number; total: number; bytes: number }) => void) {
   const directory = path.join(root, '.project-lens', 'runs', runId); const source = path.join(directory, 'source'); const artifacts = path.join(directory, 'artifacts')
   await mkdir(source, { recursive: true }); await mkdir(artifacts, { recursive: true }); await mkdir(path.join(directory, 'skill'), { recursive: true }); await writeFile(path.join(directory, 'skill', 'SKILL.md'), skill, 'utf8')
-  for (const file of files) { const target = path.resolve(source, file.path); if (!target.startsWith(source + path.sep)) throw new Error('Unsafe source path.'); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, file.content, 'utf8') }
+  for (const [index, file] of files.entries()) { const target = path.resolve(source, file.path); if (!target.startsWith(source + path.sep)) throw new Error('Unsafe source path.'); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, file.content, 'utf8'); onFile?.({ path: file.path.replaceAll('\\', '/'), index: index + 1, total: files.length, bytes: Buffer.byteLength(file.content) }) }
   const entries = files.map((file) => ({ path: file.path.replaceAll('\\', '/'), lookupKey: process.platform === 'win32' ? file.path.toLowerCase().replaceAll('\\', '/') : file.path.replaceAll('\\', '/'), bytes: Buffer.byteLength(file.content), sha256: createHash('sha256').update(file.content).digest('hex'), category: /(^|\/)(package\.json|vite\.config|tsconfig|README)/i.test(file.path) ? 'project-control' : /(^|\/)(test|tests|__tests__)\//i.test(file.path) ? 'test' : 'source', included: true }))
   const fingerprint = createHash('sha256').update(entries.map((entry) => `${entry.path}\0${entry.sha256}`).sort().join('\n')).digest('hex')
   await writeFile(path.join(directory, 'source-manifest.json'), JSON.stringify({ schemaVersion: 1, fingerprint, entries }, null, 2), 'utf8')
   return { directory, source, artifacts }
 }
-export function runCodexCli(options: { executable: string; args: string[]; cwd: string; prompt: string; onEvent: (event: CodexRuntimeEvent) => void; signal: AbortSignal }) {
+export function runCodexCli(options: { executable: string; args: string[]; cwd: string; prompt: string; onEvent: (event: CodexRuntimeEvent) => void; onProcess?: (child: ReturnType<typeof spawn>) => void; signal: AbortSignal }) {
   const child = spawn(options.executable, options.args, { cwd: options.cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+  options.onProcess?.(child)
   const decoder = new TextDecoder('utf-8', { fatal: false }); let buffer = ''; let stderr = ''
   const handle = (line: string) => {
     if (line.length > 1_000_000) return options.onEvent({ type: 'warning', message: 'Codex emitted an oversized JSONL line.' })
