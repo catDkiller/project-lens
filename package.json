@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Project Lens helps developers understand AI-generated software projects.",
-  "engines": { "node": ">=20.19.0" },
+  "engines": { "node": "^20.19.0 || >=22.12.0" },
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,blue \"npm run daemon\" \"npm run dev:web\"",
