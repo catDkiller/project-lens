@@ -4,9 +4,17 @@ Project Lens is a local-first, Codex-powered workspace for understanding
 unfamiliar software repositories. It turns deterministic project evidence and
 bounded agent analysis into an evidence-backed Overview and Complete Guide.
 
-**Live website:** `PUBLIC_WEBSITE_URL_PENDING`
+**Live website:** <https://website-seven-beryl-14.vercel.app/>
 
 **GitHub:** <https://github.com/catDkiller/project-lens>
+
+**Demo video:** coming before final submission.
+
+## Public links
+
+- [Live website](https://website-seven-beryl-14.vercel.app/)
+- [GitHub repository](https://github.com/catDkiller/project-lens)
+- Demo video — coming before final submission
 
 ## The problem
 
