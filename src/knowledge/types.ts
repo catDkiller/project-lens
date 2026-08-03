@@ -47,6 +47,7 @@ export interface ProjectKnowledgeBase {
   projectParts?: ProjectPart[]
   importantFiles?: ProjectItem[]
   commands?: { command: string; description: string }[]
+  relationships?: { fromPath: string; toPath: string; type: 'imports'; status: 'analysed' }[]
   decisions?: { title: string; note: string; status: 'review' | 'essential' }[]
   learningOrder?: { order: number; topic: string; reason: string; partId?: string }[]
   technicalEvidence?: string[]

@@ -37,6 +37,8 @@ describe('generic selected-folder evidence', () => {
     expect(base.commands?.map((item) => item.command)).toEqual(['npm run build', 'npm run dev'])
     expect(presentation.sections?.find((section) => section.id === 'commands')?.items?.[0]?.explanation).toContain('package.json')
     expect(presentation.sections?.find((section) => section.id === 'how-it-works')?.items?.[0]?.relatedEvidence?.[0]?.path).toBe('src/index.ts')
+    expect(base.relationships).toEqual([{ fromPath: 'src/index.ts', toPath: 'src/server.ts', type: 'imports', status: 'analysed' }])
+    expect(presentation.technicalReference?.find((section) => section.id === 'verified-file-communication')?.importRelationships).toEqual(['src/index.ts imports src/server.ts'])
   })
 
   it('discards optional Codex paths that are not in the selected-folder manifest', async () => {
