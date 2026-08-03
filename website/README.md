@@ -6,8 +6,7 @@ serif type, section navigation, and keyboard/drag/scroll movement.
 
 It has no daemon, account, or project-upload flow. The page does not analyse
 visitor projects; it explains the evidence-backed Overview and Complete Guide
-experience. The final demo-video stop is a truthful placeholder until a video
-source is supplied.
+experience. The final demo is embedded from YouTube.
 
 ## Local development
 
@@ -23,20 +22,16 @@ npm run preview
 From the repository root, use `npm run website:dev`. The public site uses port
 4174 so it cannot conflict with the Project Lens application.
 
-## Add the final demo video
+## Final demo video
 
-Add the final demo video here:
+The public website embeds the final demo directly from YouTube:
 
-`website/public/media/project-lens-demo.mp4`
+- Watch on YouTube: <https://youtu.be/lNfbdZfcho0>
+- Privacy-enhanced embed: <https://www.youtube-nocookie.com/embed/lNfbdZfcho0>
+- Public preserved report: <https://website-seven-beryl-14.vercel.app/report/>
 
-Optional poster:
-
-`website/public/media/project-lens-demo-poster.webp`
-
-No source-code changes are required. Run the website build after adding the
-file. The placeholder becomes an accessible video player with native controls
-only when the local file exists; missing media does not trigger a request or a
-404. A public `VITE_DEMO_VIDEO_URL` may also be supplied at build time.
+The website uses a responsive 16:9 iframe with native YouTube controls. No
+local video upload or source-code change is required.
 
 ## Static deployment
 

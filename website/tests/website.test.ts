@@ -22,21 +22,31 @@ describe('public website replacement', () => {
     expect(html).not.toContain('project-lens-sea.mp4')
   })
 
-  it('keeps the demo placeholder honest and configurable', async () => {
+  it('embeds the final YouTube demo without a local media dependency', async () => {
     const html = await readFile(path.join(root, 'index.html'), 'utf8')
     const config = await readFile(path.join(root, 'vite.config.ts'), 'utf8')
     expect(html).toContain('See Project Lens in action')
-    expect(html).toContain('demo-placeholder')
-    expect(html).toContain('preload=\'metadata\'')
-    expect(config).toContain('VITE_DEMO_VIDEO_URL')
-    expect(config).toContain('project-lens-demo.mp4')
+    expect(html).toContain('youtube-nocookie.com/embed/lNfbdZfcho0')
+    expect(html).toContain('title="Project Lens demo video"')
+    expect(html).toContain('loading="lazy"')
+    expect(html).toContain('allowfullscreen')
+    expect(html).toContain('referrerpolicy="strict-origin-when-cross-origin"')
+    expect(html).toContain('data-terrain-interaction-ignore')
+    expect(html).toContain('href="https://youtu.be/lNfbdZfcho0"')
+    expect(html).toContain('rel="noopener noreferrer"')
+    expect(html).toContain('aspect-ratio:16/9')
+    expect(html).not.toContain('demo-placeholder')
+    expect(html).not.toContain('project-lens-demo.mp4')
+    expect(config).not.toContain('VITE_DEMO_VIDEO_URL')
   })
 
-  it('documents zero-code local demo-video replacement', async () => {
+  it('documents the final YouTube demo', async () => {
     const readme = await readFile(path.join(root, 'README.md'), 'utf8')
-    expect(readme).toContain('website/public/media/project-lens-demo.mp4')
-    expect(readme).toContain('website/public/media/project-lens-demo-poster.webp')
-    expect(readme).toContain('No source-code changes are required.')
+    expect(readme).toContain('https://youtu.be/lNfbdZfcho0')
+    expect(readme).toContain('https://www.youtube-nocookie.com/embed/lNfbdZfcho0')
+    expect(readme).toContain('responsive 16:9 iframe')
+    expect(readme).not.toContain('project-lens-demo.mp4')
+    expect(readme).toContain('source-code change is required')
   })
 
   it('keeps both GitHub actions clickable above the terrain', async () => {

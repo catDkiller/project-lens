@@ -6,15 +6,18 @@ bounded agent analysis into an evidence-backed Overview and Complete Guide.
 
 **Live website:** <https://website-seven-beryl-14.vercel.app/>
 
+**Public report:** <https://website-seven-beryl-14.vercel.app/report/>
+
 **GitHub:** <https://github.com/catDkiller/project-lens>
 
-**Demo video:** coming before final submission.
+**Demo video:** <https://youtu.be/lNfbdZfcho0>
 
 ## Public links
 
 - [Live website](https://website-seven-beryl-14.vercel.app/)
+- [Public report](https://website-seven-beryl-14.vercel.app/report/)
 - [GitHub repository](https://github.com/catDkiller/project-lens)
-- Demo video — coming before final submission
+- [Demo video](https://youtu.be/lNfbdZfcho0)
 
 ## The problem
 
@@ -97,11 +100,12 @@ interactive landscape language and does not deploy the local daemon.
 
 ## Demo video
 
-The public website includes a truthful placeholder: demo video coming before
-final submission. To replace it without editing page code, add
-`website/public/media/project-lens-demo.mp4` (optionally a poster at
-`website/public/media/project-lens-demo-poster.webp`) or set
-`VITE_DEMO_VIDEO_URL` before building.
+The final demo is embedded from YouTube on the public website:
+
+- Watch on YouTube: <https://youtu.be/lNfbdZfcho0>
+- Privacy-enhanced embed: <https://www.youtube-nocookie.com/embed/lNfbdZfcho0>
+
+The website does not require a local video upload or source-code change.
 
 ## Known limitations
 
