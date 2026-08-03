@@ -1,66 +1,68 @@
 # Project Lens
 
-Project Lens helps developers understand unfamiliar software projects, especially projects created with coding agents. It combines deterministic project inspection with an optional Codex analysis, runs against a disposable read-only copy, validates generated artifacts, and presents an Overview, Complete Guide, Explore, and Review workspace.
+Project Lens is a local-first, Codex-powered workspace for understanding
+unfamiliar software repositories. It turns deterministic project evidence and
+bounded agent analysis into an evidence-backed Overview and Complete Guide.
 
-## Theme 2: UX for Agentic Applications
+**Live website:** `PUBLIC_WEBSITE_URL_PENDING`
 
-The interface makes a local coding agent understandable: the user chooses a project, sees factual progress, and browses evidence-backed output instead of a chat transcript.
+**GitHub:** <https://github.com/catDkiller/project-lens>
 
-## Locked MVP
+## The problem
 
-- Prepared React/Vite sample and safe local project-folder import
-- Deterministic inventory, imports, and project-part detection
-- Codex CLI with an existing ChatGPT sign-in (GPT-5.4 mini is preferred when discovered)
-- Disposable read-only workspace, control-file quarantine, output validation, cancellation, and cleanup
+AI-generated projects can run before their creators understand the structure,
+dependencies, or complexity they contain. Project Lens helps developers build a
+reliable mental model before changing or copying a project.
 
-## Postponed
+## The solution
 
-GitHub import, multiple agents, runtime AI providers other than Codex, automatic refactoring, and databases. The prepared sample remains the most reliable demo path.
+The local application inventories a project, maps static imports, detects
+project parts, and—when Codex is connected—produces a validated report. The
+workspace presents an Overview, Complete Guide, Explore view, Review cautions,
+project map, file evidence, and uncertainty instead of a chat transcript.
 
-## Prerequisites
+## Key features
 
-- Node.js 20 or newer
-- Codex CLI installed and signed in for AI-assisted analysis
+- Prepared React/Vite sample and safe local-folder analysis
+- Deterministic inventory, imports, relationships, and project-part detection
+- Codex analysis in a disposable, read-only, quarantined workspace
+- Validated Markdown artifacts and structured report views
+- Evidence, uncertainty, learning order, and review-before-copy guidance
+- Public prototype-based website with an interactive terrain presentation
 
-## Start the application
+## How the local analyser works
 
-```powershell
-npm install
-npm run dev
-```
+1. A ProjectSource normalizes approved project files.
+2. Deterministic analysis inventories files and extracts static imports.
+3. Project parts are selected from replaceable evidence-based definitions.
+4. Codex receives only a bounded request and isolated read-only project copy.
+5. Generated Overview and Complete Guide artifacts are validated before display.
 
-The Vite frontend opens at `http://localhost:5173`. The local daemon listens on loopback at `http://127.0.0.1:8787`.
+The hosted website demonstrates the product story. It cannot inspect a visitor's
+computer or run the local analyser. New local-folder analysis runs through the
+local application. Large repositories use bounded analysis and may require
+additional preprocessing.
 
-Choose the prepared sample or select a local project folder. Project Lens filters dependencies, generated output, secrets, unsupported binaries, and oversized files before analysis. Codex authentication is required for an AI-assisted run; deterministic inspection remains local.
+## Local-first privacy model
 
-## Runtime data and privacy
+Files are prepared locally. Relevant project text may be sent by Codex to the
+selected model provider. Sensitive, ignored, generated, binary, and oversized
+files are excluded. Temporary run data lives under `.project-lens/`, which is
+ignored by Git. Do not commit credentials, `.env` files, reports, or runtime
+logs.
 
-Temporary run data is stored under `.project-lens/` and is ignored by Git. Files are prepared locally. Relevant project text may be sent by Codex to the selected model provider. Sensitive and ignored files are excluded. Do not commit `.env` files, tokens, provider credentials, generated reports, or runtime logs.
+## Architecture and stack
 
-## Architecture and limitations
+- React, TypeScript, and Vite frontend
+- TypeScript loopback daemon for local orchestration
+- Small ProjectSource contracts for prepared and local projects
+- Deterministic TypeScript analysis modules
+- Codex CLI adapter with disposable workspace, permission isolation, and output validation
+- Vitest tests and plain CSS; no database, router, or global state library
 
-The browser talks to a loopback TypeScript daemon. Project-source adapters normalize prepared and local files; deterministic modules inventory files, extract imports, and detect project parts. Codex writes bounded Markdown artifacts into an isolated workspace; the daemon validates and serves them to the report workspace. GitHub import, many frameworks, automatic refactoring, persistent accounts, and database-backed history are not implemented.
+## Setup and local development
 
-See [runtime architecture](docs/runtime-architecture.md) and [runtime adapters](docs/runtime-adapters.md) for implementation details.
-
-## Public website
-
-The static Project Lens story uses the approved interactive landscape
-prototype language and is independent from the local analyser:
-
-```powershell
-npm run website:dev
-```
-
-It serves `website/` at `http://localhost:4174`. The dedicated
-`start-project-lens-website.bat` and `stop-project-lens-website.bat` launchers
-control only that public website process.
-
-## License and attribution
-
-Project Lens is released under the MIT License. The Codex CLI adapter contains an Apache-2.0-attributed adaptation of process and JSONL event-stream ideas from Open Design; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Local development
+Requirements: Node.js 20+ and Codex CLI signed in for AI-assisted analysis.
 
 ```powershell
 npm install
@@ -69,3 +71,49 @@ npm run test
 npm run lint
 npm run build
 ```
+
+The application uses Vite on `http://localhost:5173` and a loopback daemon on
+`http://127.0.0.1:8787`.
+
+### Public website development
+
+```powershell
+npm run website:dev
+npm run website:test
+npm run website:lint
+npm run website:build
+```
+
+The independent public website runs on port `4174`. It uses the approved
+interactive landscape language and does not deploy the local daemon.
+
+## Demo video
+
+The public website includes a truthful placeholder: demo video coming before
+final submission. To replace it without editing page code, add
+`website/public/media/project-lens-demo.mp4` (optionally a poster at
+`website/public/media/project-lens-demo-poster.webp`) or set
+`VITE_DEMO_VIDEO_URL` before building.
+
+## Known limitations
+
+GitHub import, additional agents, many frameworks, automatic refactoring,
+accounts, databases, and persistent curriculum tracking are not implemented.
+The prepared sample remains the most reliable demonstration path.
+
+## Codex usage and hackathon track
+
+Codex supported planning, multi-step implementation, testing, and self-review.
+The project is submitted under **Theme 2: UX for Agentic Applications**.
+
+Primary track: **Agentic Coding**
+
+## Author
+
+Garvit Arya
+
+## License
+
+MIT. The Codex CLI adapter contains an Apache-2.0-attributed adaptation of
+process and JSONL event-stream ideas from Open Design; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
