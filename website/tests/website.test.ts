@@ -21,4 +21,23 @@ describe('public website replacement', () => {
     expect(html).toContain('Local-first limits')
     expect(html).not.toContain('project-lens-sea.mp4')
   })
+
+  it('keeps the demo placeholder honest and configurable', async () => {
+    const html = await readFile(path.join(root, 'index.html'), 'utf8')
+    const config = await readFile(path.join(root, 'vite.config.ts'), 'utf8')
+    expect(html).toContain('See Project Lens in action')
+    expect(html).toContain('demo-placeholder')
+    expect(html).toContain('preload=\'metadata\'')
+    expect(config).toContain('VITE_DEMO_VIDEO_URL')
+    expect(config).toContain('project-lens-demo.mp4')
+  })
+
+  it('normalizes wheel input without section-index snapping', async () => {
+    const html = await readFile(path.join(root, 'index.html'), 'utf8')
+    expect(html).toContain('deltaMode===1')
+    expect(html).toContain('deltaMode===2')
+    expect(html).toContain('INPUT.wheelWindowMs')
+    expect(html).toContain('INPUT.maxVelocity')
+    expect(html).not.toContain('go(clamp(closest()+direction,0,N-1))')
+  })
 })
