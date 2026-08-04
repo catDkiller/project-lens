@@ -27,7 +27,7 @@ describe('provider-independent presentation schema', () => {
     expect(markup).toContain('File connections')
     expect(markup).toContain('Important symbols')
     expect(markup).toContain('does not claim to be a')
-    expect(markup).toContain('<dfn>call graph</dfn>')
+    expect(markup).toContain('<dfn title="A call graph tracks which functions invoke other functions.')
     expect(markup).toContain('View code evidence')
     expect(markup).toContain('Copy excerpt')
     expect(markup).toContain('Static import')
