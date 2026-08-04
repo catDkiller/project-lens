@@ -12,6 +12,10 @@ bounded agent analysis into an evidence-backed Overview and Complete Guide.
 
 **Demo video:** <https://youtu.be/lNfbdZfcho0>
 
+**Installation guide:** [INSTALL.md](INSTALL.md)
+
+**Codex-assisted installation:** [docs/CODEX_INSTALL_PROJECT_LENS.md](docs/CODEX_INSTALL_PROJECT_LENS.md)
+
 ## Public links
 
 - [Live website](https://website-seven-beryl-14.vercel.app/)
